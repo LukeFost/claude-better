@@ -56,20 +56,22 @@ Start a new Claude Code session, in the terminal or in the Claude desktop app's 
 
 ## Cursor
 
-The same `/better` works as a skill for Cursor's agent, in the desktop app and in `cursor-agent`. It runs the same read-only `claude -p` helper with the same guard, so it needs the `claude` CLI, signed in, and Node 23.6 or later (it runs `run-helper.ts` directly).
+The same `/better` works in Cursor's agent, in the desktop app and in `cursor-agent`, as a Cursor plugin. It gives the agent two tools, `better` and `check_brief`, plus a skill that tells it when to use them. They run the same read-only `claude -p` helper with the same guard, so it needs the `claude` CLI, signed in, and Node 23.6 or later.
 
 ```sh
-git clone https://github.com/LukeFost/claude-better ~/claude-better   # or use an existing clone
-ln -s ~/claude-better/cursor/skills/better ~/.cursor/skills/better
+git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/better
 ```
 
-Then type `/better <prompt>` in a Cursor chat, or start a subagent prompt with `/better `. How it differs from the plugin:
+Then reload Cursor and type `/better <prompt>` in a chat, or start a subagent prompt with `/better `. For `cursor-agent`, add `--plugin-dir ~/.cursor/plugins/local/better`. To update, `git pull` in that folder; to remove, use Remove in Cursor's plugin settings or delete the folder.
 
-- The helper can't fork the Cursor chat, so the agent writes what the chat established into the helper's input.
-- The improved prompt is shown once in the chat and put on the clipboard; Cursor has no input box a skill can fill.
-- Cancel means stopping the shell command; the helper stops with it and nothing is produced.
-- There is no `/better-boomerang` or `check_brief` tool.
+How it differs from the Claude Code plugin:
+
+- The helper can't fork the Cursor chat, so the agent passes what the chat established along with the prompt.
+- The stages show on the tool card. When it's done, the improved prompt opens in a new chat box in the Cursor app through Cursor's prompt link, and goes on the clipboard. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
+- Cancel with Cursor's stop button: the helper stops and nothing is produced.
+- There is no `/better-boomerang`.
 - Run records go to `~/.claude/better/runs` with `"from": "cursor"`.
+- If the plugin isn't loaded, Cursor has no `/better` command, and the agent may take `/better <prompt>` as a plain task and start on it. Check that Cursor lists the `better` tools before you rely on it.
 
 ## Limits
 

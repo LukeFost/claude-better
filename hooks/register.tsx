@@ -10,6 +10,8 @@ import {
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
 const briefsA = atom({ plugin: 'better', key: 'briefs' } as const, 0)
 const boomA = atom({ plugin: 'better', key: 'boomerang' } as const, null as BetterBoomerang | null)
+// Every /better-boomerang fork started, kept in an atom too so a module reload doesn't unguard a fork still running.
+const forksA = atom({ plugin: 'better', key: 'forks' } as const, [] as string[])
 const tickA = atom({ plugin: 'better', key: 'tick' } as const, 0)
 
 const TOOL = 'check_brief'
@@ -218,7 +220,7 @@ export const register: Register = (on) => {
 
   // The helper's own guard (inside the helper process), and the boomerang fork's (in this one).
   on('tool.check', async ($, e, next) => {
-    if (!S.isHelper && !(e.agentId !== undefined && S.forks.has(e.agentId))) return next(e)
+    if (!S.isHelper && !(e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA)) ?? []).includes(e.agentId)))) return next(e)
     const verdict = helperVerdict(e.tool, e.isReadOnly)
     // A read goes on to Claude Code's own checks (dontAsk's folder scope, deny rules, other hooks); never allowed here.
     return verdict.decision === 'pass' ? next(e) : { decision: 'deny', reason: verdict.reason }
@@ -279,6 +281,7 @@ export const register: Register = (on) => {
       return { text: `/better-boomerang couldn't start its fork: ${deny}` }
     }
     S.forks.add(spawned.agentId)
+    await update($, forksA, (ids) => [...(ids ?? []), spawned.agentId!])
     await update($, boomA, () => ({ agentId: spawned.agentId!, startedAt: Date.now(), status: 'running' }))
     startTicker($)
     const viewed = await $.ui.view({ agentId: spawned.agentId })

@@ -1,0 +1,127 @@
+// The /better MCP server for Cursor (stdio, newline-delimited JSON-RPC). Two tools:
+//   better       deepen a prompt; the result goes to a new chat box in the Cursor app (its prompt link), else the clipboard
+//   check_brief  check a subagent brief; returns it to use verbatim
+// Progress shows on the tool card (notifications/progress), and Cursor's stop button cancels the helper.
+import { spawn, spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { createInterface } from 'node:readline'
+import { PLUGIN_ROOT, runHelper } from './helper.ts'
+
+const VERSION: string = JSON.parse(readFileSync(new URL('../.cursor-plugin/plugin.json', import.meta.url), 'utf8')).version
+// Cursor's prompt link refuses text whose URL form is longer than this.
+const PROMPT_LINK_MAX = 10_000
+
+const TOOLS = [
+  {
+    name: 'better',
+    description: [
+      "Deepen the user's prompt with a read-only helper that reads the code it touches, then hand the improved prompt back without acting on it.",
+      'Use for /better. The helper cannot see this chat, so pass what the chat established in `context`.',
+      'The result opens in a new chat box in the Cursor app (or goes to the clipboard); show it once and stop: never carry it out.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: "The user's prompt, word for word. If they gave none, the task in progress in their words, with their feedback on work already done." },
+        context: { type: 'string', description: 'What this chat established that the repo alone will not show: decisions, file paths, errors, constraints. Facts only.' },
+        cwd: { type: 'string', description: 'The workspace folder (absolute path).' },
+      },
+      required: ['prompt', 'cwd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'check_brief',
+    description: [
+      'Check a brief before handing it to a subagent that starts with none of this chat: the read-only helper fixes references only this chat explains, wrong or stale paths, symbols and commands, and a missing done-check, and keeps the rest.',
+      'Use when a subagent prompt starts with "/better " (drop the mark). Start the subagent with the returned brief verbatim; if this fails, do not start it.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        brief: { type: 'string', description: 'The brief as you would send it, without the "/better " mark.' },
+        context: { type: 'string', description: 'Only if the brief points at things this chat decided: those facts.' },
+        cwd: { type: 'string', description: 'The workspace folder the subagent will work in (absolute path).' },
+      },
+      required: ['brief', 'cwd'],
+      additionalProperties: false,
+    },
+  },
+]
+
+const send = (msg: unknown) => process.stdout.write(`${JSON.stringify(msg)}\n`)
+const calls = new Map<string | number, AbortController>()
+
+// The Cursor app sets these for the processes it starts; cursor-agent in a terminal does not, and a prompt link
+// would pull the app forward there, so it gets the clipboard only.
+const isCursorApp = () => Boolean(process.env.VSCODE_PID || process.env.VSCODE_IPC_HOOK || process.env.CURSOR_TRACE_ID)
+
+function toClipboard(text: string): boolean {
+  if (process.platform !== 'darwin') return false
+  return spawnSync('pbcopy', { input: text }).status === 0
+}
+
+function openInNewChat(text: string): boolean {
+  if (process.platform !== 'darwin' || !isCursorApp()) return false
+  const url = `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(text)}`
+  if (url.length > PROMPT_LINK_MAX) return false
+  spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
+  return true
+}
+
+async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
+  const isBrief = name === 'check_brief'
+  const body = String((isBrief ? args?.brief : args?.prompt) ?? '').replace(/^\/better(\s|$)/, '').trim()
+  const cwd = typeof args?.cwd === 'string' && args.cwd ? args.cwd : process.cwd()
+  if (!body) return { isError: true, content: [{ type: 'text', text: isBrief ? 'check_brief needs the brief.' : 'better needs the prompt (or the task in progress).' }] }
+  const context = typeof args?.context === 'string' && args.context.trim() ? `\n\n## What this chat established\n\n${args.context.trim()}` : ''
+  const stop = new AbortController()
+  calls.set(id, stop)
+  try {
+    const out = await runHelper({
+      kind: isBrief ? 'brief' : 'better', input: body + context, cwd, signal: stop.signal,
+      onStage: (progress, total, message) => {
+        if (progressToken !== undefined) send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken, progress, total, message } })
+      },
+    })
+    if (!out.ok) {
+      const text = out.cancelled ? '/better was cancelled; nothing was produced.' : `/better failed: ${out.error}`
+      return { isError: true, content: [{ type: 'text', text: isBrief ? `${text} Do not start the subagent with the unchecked brief.` : text }] }
+    }
+    if (isBrief) return { content: [{ type: 'text', text: out.text }] }
+    const opened = openInNewChat(out.text)
+    const copied = toClipboard(out.text)
+    const where = opened
+      ? `It is open in a new chat box${copied ? ' and on the clipboard' : ''}, not sent.`
+      : copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'
+    return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
+  } finally {
+    calls.delete(id)
+  }
+}
+
+createInterface({ input: process.stdin }).on('line', async (line) => {
+  let msg: any
+  try {
+    msg = JSON.parse(line)
+  } catch {
+    return
+  }
+  const { id, method, params } = msg
+  if (method === 'notifications/cancelled') return calls.get(params?.requestId)?.abort()
+  if (id === undefined) return
+  try {
+    if (method === 'initialize') {
+      return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'better', version: VERSION }, instructions: `Read-only prompt deepening and brief checks. Guard: ${PLUGIN_ROOT}/hooks/register.tsx.` } })
+    }
+    if (method === 'ping') return send({ jsonrpc: '2.0', id, result: {} })
+    if (method === 'tools/list') return send({ jsonrpc: '2.0', id, result: { tools: TOOLS } })
+    if (method === 'tools/call') {
+      const result = await call(id, params?.name, params?.arguments, params?._meta?.progressToken)
+      return send({ jsonrpc: '2.0', id, result })
+    }
+    send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method ${method}` } })
+  } catch (e) {
+    send({ jsonrpc: '2.0', id, error: { code: -32603, message: (e as Error).message } })
+  }
+})

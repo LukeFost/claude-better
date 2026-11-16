@@ -24,6 +24,8 @@ declare module 'claude-code' {
       briefs: number
       boomerang: BetterBoomerang | null
       tick: number
+      /** every /better-boomerang fork started this session; each stays guarded for its whole life */
+      forks: string[]
     }
   }
 }

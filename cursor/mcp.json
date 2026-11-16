@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "better": {
+      "command": "${CURSOR_PLUGIN_ROOT}/cursor/bin/better-mcp"
+    }
+  }
+}
