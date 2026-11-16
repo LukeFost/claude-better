@@ -30,7 +30,8 @@ export function runHelper(req: {
   const questions = req.kind === 'brief' ? 3 : 4
 
   const settle = (record: Record<string, unknown>, out: Outcome): Outcome => {
-    writeFileSync(log, JSON.stringify({ kind: req.kind, input: req.input, cwd: req.cwd, model: req.model ?? null, claude: claude ?? null, argv: argv.slice(1), from: 'cursor', durationMs: Date.now() - startedAt, ...record }, null, 2))
+    const error = out.ok ? undefined : out.error
+    writeFileSync(log, JSON.stringify({ kind: req.kind, input: req.input, cwd: req.cwd, model: req.model ?? null, claude: claude ?? null, argv: argv.slice(1), from: 'cursor', durationMs: Date.now() - startedAt, error, ...record }, null, 2))
     chmodSync(log, 0o600)
     return out
   }

@@ -3,9 +3,12 @@
 //   check_brief  check a subagent brief; returns it to use verbatim
 // Progress shows on the tool card (notifications/progress), and Cursor's stop button cancels the helper.
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { PLUGIN_ROOT, runHelper } from './helper.ts'
+import { isInside, outsideFolder } from '../hooks/better.ts'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../.cursor-plugin/plugin.json', import.meta.url), 'utf8')).version
 // Cursor's prompt link refuses text whose URL form is longer than this.
@@ -24,9 +27,9 @@ const TOOLS = [
       properties: {
         prompt: { type: 'string', description: "The user's prompt, word for word. If they gave none, the task in progress in their words, with their feedback on work already done." },
         context: { type: 'string', description: 'What this chat established that the repo alone will not show: decisions, file paths, errors, constraints. Facts only.' },
-        cwd: { type: 'string', description: 'The workspace folder (absolute path).' },
+        cwd: { type: 'string', description: 'The workspace folder, or a folder inside it (absolute path). Left out: the workspace.' },
       },
-      required: ['prompt', 'cwd'],
+      required: ['prompt'],
       additionalProperties: false,
     },
   },
@@ -41,9 +44,9 @@ const TOOLS = [
       properties: {
         brief: { type: 'string', description: 'The brief as you would send it, without the "/better " mark.' },
         context: { type: 'string', description: 'Only if the brief points at things this chat decided: those facts.' },
-        cwd: { type: 'string', description: 'The workspace folder the subagent will work in (absolute path).' },
+        cwd: { type: 'string', description: 'The folder the subagent will work in: the workspace or a folder inside it (absolute path). Left out: the workspace.' },
       },
-      required: ['brief', 'cwd'],
+      required: ['brief'],
       additionalProperties: false,
     },
   },
@@ -51,6 +54,44 @@ const TOOLS = [
 
 const send = (msg: unknown) => process.stdout.write(`${JSON.stringify(msg)}\n`)
 const calls = new Map<string | number, AbortController>()
+let supportsRoots = false
+
+// The workspace: the client's roots (MCP roots/list), else this server's own folder. Never `/` or the home folder,
+// since the helper reads everything under the folder it runs in.
+let clientRoots: string[] | undefined
+let rootsPending: ((roots: string[]) => void) | undefined
+const real = (p: string) => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return undefined
+  }
+}
+function workspace(): string[] {
+  const home = real(process.env.HOME ?? '') ?? ''
+  const found = (clientRoots ?? [process.cwd()]).map(real).filter((r): r is string => !!r && r !== '/' && r !== home)
+  return [...new Set(found)]
+}
+function askRoots(): Promise<void> {
+  return new Promise((done) => {
+    const timer = setTimeout(() => ((rootsPending = undefined), done()), 3000)
+    rootsPending = (roots) => {
+      clearTimeout(timer)
+      clientRoots = roots
+      done()
+    }
+    send({ jsonrpc: '2.0', id: 'better-roots', method: 'roots/list' })
+  })
+}
+// The folder the helper may run in, or why not.
+function helperCwd(asked: unknown): { cwd: string } | { error: string } {
+  const roots = workspace()
+  if (!roots.length) return { error: "this window has no workspace folder (or it is / or your home folder), so there's nothing the helper may read. Open a project folder first." }
+  if (typeof asked !== 'string' || !asked.trim()) return { cwd: roots[0]! }
+  const target = real(isAbsolute(asked) ? asked : resolve(roots[0]!, asked))
+  if (!target) return { error: `cwd ${asked} doesn't exist.` }
+  return isInside(target, roots) ? { cwd: target } : { error: outsideFolder(asked, roots) }
+}
 
 // The Cursor app sets these for the processes it starts; cursor-agent in a terminal does not, and a prompt link
 // would pull the app forward there, so it gets the clipboard only.
@@ -72,7 +113,9 @@ function openInNewChat(text: string): boolean {
 async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
   const isBrief = name === 'check_brief'
   const body = String((isBrief ? args?.brief : args?.prompt) ?? '').replace(/^\/better(\s|$)/, '').trim()
-  const cwd = typeof args?.cwd === 'string' && args.cwd ? args.cwd : process.cwd()
+  const where = helperCwd(args?.cwd)
+  if ('error' in where) return { isError: true, content: [{ type: 'text', text: `/better refused: ${where.error}${isBrief ? ' Do not start the subagent with the unchecked brief.' : ''}` }] }
+  const cwd = where.cwd
   if (!body) return { isError: true, content: [{ type: 'text', text: isBrief ? 'check_brief needs the brief.' : 'better needs the prompt (or the task in progress).' }] }
   const context = typeof args?.context === 'string' && args.context.trim() ? `\n\n## What this chat established\n\n${args.context.trim()}` : ''
   const stop = new AbortController()
@@ -108,10 +151,21 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     return
   }
   const { id, method, params } = msg
+  if (id === 'better-roots' && method === undefined) {
+    const roots = Array.isArray(msg.result?.roots) ? msg.result.roots : []
+    rootsPending?.(roots.flatMap((r: any) => (typeof r?.uri === 'string' && r.uri.startsWith('file:') ? [fileURLToPath(r.uri)] : [])))
+    rootsPending = undefined
+    return
+  }
   if (method === 'notifications/cancelled') return calls.get(params?.requestId)?.abort()
+  if (method === 'notifications/initialized' || method === 'notifications/roots/list_changed') {
+    if (supportsRoots) await askRoots()
+    return
+  }
   if (id === undefined) return
   try {
     if (method === 'initialize') {
+      supportsRoots = Boolean(params?.capabilities?.roots)
       return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'better', version: VERSION }, instructions: `Read-only prompt deepening and brief checks. Guard: ${PLUGIN_ROOT}/hooks/register.tsx.` } })
     }
     if (method === 'ping') return send({ jsonrpc: '2.0', id, result: {} })

@@ -224,7 +224,10 @@ export const register: Register = (on) => {
     const verdict = helperVerdict(e.tool, e.isReadOnly)
     // A read goes on to Claude Code's own checks (dontAsk's folder scope, deny rules, other hooks); never allowed here.
     return verdict.decision === 'pass' ? next(e) : { decision: 'deny', reason: verdict.reason }
-  }).catch(($, e, next) => (S.isHelper || (e.agentId !== undefined && S.forks.has(e.agentId)) ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)))
+  }).catch(async ($, e, next) => {
+    const isFork = e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA).catch(() => [] as string[])) ?? []).includes(e.agentId))
+    return S.isHelper || isFork ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)
+  })
 
   // ---- /better ----
   on('command.run', { command: 'better' }, async ($, e) => {
