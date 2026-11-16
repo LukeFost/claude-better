@@ -5,6 +5,9 @@
   "types": "./types/index.d.ts",
   "license": "MIT",
   "author": {
-    "name": "Luke Foster"
-  }
+    "name": "Luke Foster",
+    "url": "https://github.com/LukeFost"
+  },
+  "homepage": "https://github.com/LukeFost/claude-better",
+  "repository": "https://github.com/LukeFost/claude-better"
 }

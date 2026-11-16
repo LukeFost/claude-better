@@ -1,8 +1,37 @@
 # better: pi-better for Claude Code
 
-A Claude Code mod that ports [pi-better](https://github.com/nicobailon/pi-better) 0.2.0 (MIT, Nico Bailon; see `LICENSE.pi-better`). pi-better's prompts are used word for word; only the session-log path in them is Claude Code's.
+**This is a port of [nicobailon/pi-better](https://github.com/nicobailon/pi-better) by Nico Bailon** (0.2.0, MIT, see [`LICENSE.pi-better`](LICENSE.pi-better)). The idea and the prompts are his; they are used word for word, and only the session-log path in them is Claude Code's. The Claude Code port is MIT too ([`LICENSE`](LICENSE)).
 
-`/better` puts a deeper version of your prompt in your input box. It uses facts from your own code, files and logs, and never sends anything. An agent can also have a subagent's brief checked against the repo before the subagent starts.
+`/better` puts a deeper version of your prompt in your input box. It builds it from your own code, files and logs, and never sends anything. An agent can also have a subagent's brief checked against the repo before the subagent starts.
+
+## Why
+
+Felix Rieseberg, who works on Claude at Anthropic, argues in [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/) that most of us ask models for too little. One of his four kinds of ambition is depth: "Considering a task the way a field-leading expert would ... we go one level deeper and touch the underlying data, tools, and problems."
+
+`/better` asks that question for you. A read-only helper reads what your prompt touches, says what a top professional would do, what raw material they would start from, which methods they would use and what would prove the result right, and then rewrites your prompt to ask for that.
+
+A real run on a small fixture repo (a retry module, a 429 log and two tests):
+
+> **Before:** `/better bump the retries so the 429s stop`
+
+> **After** (put in the input box after 46 s and 7 reads; excerpt):
+>
+> The ledger API keeps returning 429s and our client gives up. Fix it properly, not just by raising `MAX_RETRIES`.
+>
+> What we have: `src/rate_limit.py` has `MAX_RETRIES = 5` and `backoff_seconds` (0.25s doubling, capped at 8s, no jitter). `logs/ledger-429.log` shows 6 attempts getting 429 in a row on 2026-11-02 and `GAVE_UP retries=5` at 10:00:17, 8s after the last 429, so we seem to sleep once more before quitting. [...]
+>
+> Then make the smallest change that fixes it: honor `Retry-After` when present; exponential backoff with full jitter; a cap on total retry time, not just retry count; no sleep after the final failed attempt [...]
+>
+> Done means: `python3 -m pytest tests/` passes, with `tests/test_rate_limit.py` updated (it currently pins `MAX_RETRIES == 5`); a new test that replays the logged burst (6 429s, then a 200) against a fake server with an injected clock [...]
+
+## Install
+
+```sh
+claude plugin marketplace add LukeFost/claude-better
+claude plugin install better@claude-better
+```
+
+Start a new Claude Code session, then type `/better <your prompt>`.
 
 ## Use
 
@@ -43,11 +72,10 @@ claude plugin test .     # 14 tests
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
 ```
 
-## Install and remove
+## Remove
 
 ```sh
-claude plugin marketplace add ~/Documents/Development/claude-better
-claude plugin install better@claude-better
-# remove:
 claude plugin uninstall better@claude-better && claude plugin marketplace remove claude-better
 ```
+
+To work on it locally: `claude --plugin-dir <your clone>`. Editing the mod while `/better` is running reloads it and stops that run.
