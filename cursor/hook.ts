@@ -4,7 +4,7 @@
 //               checked brief, as the Claude Code mod does; if the check fails the subagent doesn't start
 import { realpathSync } from 'node:fs'
 import { runHelper } from './helper.ts'
-import { recordStop, runOnce } from './stops.ts'
+import { isWorkspaceRoot, recordStop, runOnce, stoppedSince } from './stops.ts'
 import { createHash } from 'node:crypto'
 
 const MARK = /^\/better(\s|$)/
@@ -26,9 +26,8 @@ export function planBrief(input: any, home = process.env.HOME ?? ''): Plan {
     }
   }
   const roots = (Array.isArray(input?.workspace_roots) ? input.workspace_roots : []).filter((r: unknown) => typeof r === 'string')
-  const homeReal = real(home) ?? home
-  const cwd = roots.map(real).find((r: string | undefined) => !!r && r !== '/' && r !== homeReal)
-  if (!cwd) return { deny: "this window has no workspace folder (or it is / or your home folder), so the /better brief can't be checked and the subagent didn't start." }
+  const cwd = roots.map(real).find((r: string | undefined) => !!r && isWorkspaceRoot(r, home))
+  if (!cwd) return { deny: "this window has no workspace folder (or it is /, your home folder or a folder above it), so the /better brief can't be checked and the subagent didn't start." }
   return { brief, cwd }
 }
 
@@ -47,9 +46,14 @@ async function main() {
     if ('pass' in plan) return say({})
     const deny = (why: string) => ({ permission: 'deny', user_message: why, agent_message: `${why} Do not start the subagent with the unchecked brief.` })
     if ('deny' in plan) return say(deny(`/better: ${plan.deny}`))
-    const key = createHash('sha256').update(JSON.stringify([input.conversation_id, input.generation_id, input.tool_input.prompt])).digest('hex').slice(0, 32)
+    // One key per tool call: both copies of the hook see the same tool_use_id, and a retry gets a new one.
+    const key = createHash('sha256').update(JSON.stringify([input.conversation_id, input.generation_id, input.tool_use_id, input.tool_input.prompt])).digest('hex').slice(0, 32)
     const answer = await runOnce(key, async () => {
-      const out = await runHelper({ kind: 'brief', input: plan.brief, cwd: plan.cwd })
+      // Cursor's stop button reaches only the stop hook, so watch for its marker here too.
+      const stop = new AbortController()
+      const since = Date.now()
+      const watch = setInterval(() => stoppedSince(plan.cwd, since) && stop.abort(), 500)
+      const out = await runHelper({ kind: 'brief', input: plan.brief, cwd: plan.cwd, signal: stop.signal }).finally(() => clearInterval(watch))
       if (!out.ok) return JSON.stringify(deny(out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}`))
       return JSON.stringify({ updated_input: { ...input.tool_input, prompt: out.text } })
     }).catch((e) => JSON.stringify(deny(`/better couldn't check this subagent brief, so the subagent didn't start: ${(e as Error).message}`)))
@@ -58,4 +62,8 @@ async function main() {
   say({})
 }
 
-if (process.argv[1]?.endsWith('/hook.ts')) main()
+if (process.argv[1]?.endsWith('/hook.ts'))
+  main().catch((e) => {
+    // A crash must not let an unchecked brief through; hooks.json also sets failClosed on preToolUse.
+    process.stdout.write(JSON.stringify({ permission: 'deny', user_message: `/better's hook failed, so the subagent didn't start: ${(e as Error).message}` }))
+  })

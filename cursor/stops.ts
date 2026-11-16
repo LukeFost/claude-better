@@ -17,9 +17,14 @@ const real = (p: string) => {
   }
 }
 
+/** A folder the helper may treat as a workspace: not /, not the home folder and not a folder that holds it. */
+export function isWorkspaceRoot(root: string, home = process.env.HOME ?? ''): boolean {
+  return !!root && !isInside(real(home), [real(root)])
+}
+
 /** Records that the user stopped a turn in these workspace folders. */
-export function recordStop(roots: unknown, dir = stopsDir(), now = Date.now()): void {
-  const list = Array.isArray(roots) ? roots.filter((r): r is string => typeof r === 'string' && r.length > 0).map(real) : []
+export function recordStop(roots: unknown, dir = stopsDir(), now = Date.now(), home = process.env.HOME ?? ''): void {
+  const list = Array.isArray(roots) ? roots.filter((r): r is string => typeof r === 'string' && r.length > 0).map(real).filter((r) => isWorkspaceRoot(r, home)) : []
   if (!list.length) return
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${now}-${process.pid}.json`), JSON.stringify({ at: now, roots: list }))

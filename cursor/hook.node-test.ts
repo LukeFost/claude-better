@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { planBrief } from './hook.ts'
 import { recordStop, runOnce, stoppedSince } from './stops.ts'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 
 test("Cursor's stop button: a stop marker cancels runs in that workspace that began before it, and nothing else", () => {
   const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
@@ -52,4 +52,23 @@ test('two copies of the hook share one helper run per call, and a dead holder is
   assert.deepEqual([a, b, runs], ['checked', 'checked', 1])
   writeFileSync(join(dir, 'dead.lock'), '999999') // a holder that no longer runs
   assert.equal(await runOnce('dead', async () => 'mine', dir, 5_000), 'mine')
+})
+
+test('a folder that holds the home folder is never a workspace: no brief check there, and a stop there cancels nothing', () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), 'better-top-')))
+  const home = join(top, 'me')
+  mkdirSync(home)
+  const ws = join(home, 'proj')
+  mkdirSync(ws)
+  const plan = (roots: string[]) => planBrief({ tool_name: 'Task', tool_input: { prompt: '/better do it' }, workspace_roots: roots }, home)
+  assert.ok('deny' in plan([top]))
+  assert.ok('deny' in plan([home]))
+  assert.deepEqual(plan([ws]), { brief: 'do it', cwd: ws })
+  assert.deepEqual(plan([top, ws]), { brief: 'do it', cwd: ws })
+  const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
+  recordStop([top], dir, 1, home)
+  recordStop([home], dir, 1, home)
+  assert.equal(readdirSync(dir).length, 0)
+  recordStop([ws], dir, 1, home)
+  assert.equal(readdirSync(dir).length, 1)
 })

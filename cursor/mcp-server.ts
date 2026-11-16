@@ -11,7 +11,7 @@ import { createInterface } from 'node:readline'
 import { PLUGIN_ROOT, runHelper } from './helper.ts'
 import { isInside, outsideFolder } from '../hooks/better.ts'
 import { linkRefusal } from './link.ts'
-import { stoppedSince } from './stops.ts'
+import { isWorkspaceRoot, stoppedSince } from './stops.ts'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../.cursor-plugin/plugin.json', import.meta.url), 'utf8')).version
 
@@ -57,7 +57,7 @@ const send = (msg: unknown) => process.stdout.write(`${JSON.stringify(msg)}\n`)
 const calls = new Map<string | number, AbortController>()
 let supportsRoots = false
 
-// The workspace: the client's roots (MCP roots/list), else this server's own folder. Never `/` or the home folder,
+// The workspace: the client's roots (MCP roots/list), else this server's own folder. Never `/`, the home folder or a folder above it,
 // since the helper reads everything under the folder it runs in.
 let clientRoots: string[] | undefined
 let rootsPending: ((roots: string[]) => void) | undefined
@@ -69,8 +69,7 @@ const real = (p: string) => {
   }
 }
 function workspace(): string[] {
-  const home = real(process.env.HOME ?? '') ?? ''
-  const found = (clientRoots ?? [process.cwd()]).map(real).filter((r): r is string => !!r && r !== '/' && r !== home)
+  const found = (clientRoots ?? [process.cwd()]).map(real).filter((r): r is string => !!r && isWorkspaceRoot(r))
   return [...new Set(found)]
 }
 function askRoots(): Promise<void> {
@@ -87,7 +86,7 @@ function askRoots(): Promise<void> {
 // The folder the helper may run in, or why not.
 function helperCwd(asked: unknown): { cwd: string } | { error: string } {
   const roots = workspace()
-  if (!roots.length) return { error: "this window has no workspace folder (or it is / or your home folder), so there's nothing the helper may read. Open a project folder first." }
+  if (!roots.length) return { error: "this window has no workspace folder (or it is /, your home folder or a folder above it), so there's nothing the helper may read. Open a project folder first." }
   if (typeof asked !== 'string' || !asked.trim()) return { cwd: roots[0]! }
   const target = real(isAbsolute(asked) ? asked : resolve(roots[0]!, asked))
   if (!target) return { error: `cwd ${asked} doesn't exist.` }
