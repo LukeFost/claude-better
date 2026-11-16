@@ -47,12 +47,12 @@ Start a new Claude Code session, in the terminal or in the Claude desktop app's 
 
 | pi-better | This mod |
 |---|---|
-| A `pi --fork` helper process with read tools | A `claude -p --resume <session> --fork-session --no-session-persistence` helper. Its tools are Read, Grep, Glob and Bash, with `--strict-mcp-config` and `dontAsk`. The mod loads into the helper (`CLAUDE_BETTER_HELPER=1`) and its `tool.check` guard allows only reads, plus Bash that Claude Code's own read-only check passes. |
+| A `pi --fork` helper process with read tools | A `claude -p --resume <session> --fork-session --no-session-persistence` helper. Its tools are Read, Grep, Glob and Bash, with `--strict-mcp-config`, `dontAsk` and `--setting-sources ''`. The mod loads into the helper (`CLAUDE_BETTER_HELPER=1`) and its `tool.check` guard refuses everything but reads and Bash that Claude Code's own read-only check passes. It never allows a read itself: Claude Code's `dontAsk` scope still limits reads to the working folder. When the guard loads it writes the run record's first version; a run without that is refused. |
 | Progress widget with a meter, tool chips and a clock | The same two rows, drawn in the band above the prompt |
 | The prompt goes above your draft | The same, using `$.prompt.read` and `$.prompt.fill`. If the box can't take it, the prompt goes on the clipboard. |
 | `/better-boomerang`: runs in the chat, then `navigateTree` back | A read-only fork subagent shown in the main view (`$.ui.view`). Back is one press or `/better-back`. The main conversation never sees the research. |
 | A `/better` subagent brief is checked with brief.md, and a failure blocks the start | The same, on the `Agent` tool. A failure, a cancel or a reply with no marked brief refuses the call, so no subagent starts. |
-| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` holding input, argv, exit code, the last 3 stderr lines, tools, reply and result. No environment or credentials go in it. |
+| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
 
 ## Limits
 
@@ -66,13 +66,14 @@ Start a new Claude Code session, in the terminal or in the Claude desktop app's 
 - **In auto mode, a `/better`-marked Agent call is refused after the check**, because Claude Code won't run a prompt that changed after approval. The agent then resends the checked brief, which the classifier reviews, and the unchecked brief never runs. To avoid the round trip, call `check_brief` first.
 - **Each command leaves one line in the transcript** (`/better is reading ...`), which the model can read. Pi's custom entries leave none.
 - **The helper runs the `claude` CLI.** It takes the first `claude` on PATH, then `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` (an app launched from the Dock may lack your shell's PATH), then the engine the desktop app itself runs. The run record names the one it used. If there is none, `/better` says how to install it and nothing starts.
+- **The helper reads only inside the working folder, and loads none of your settings files.** No allow rule, yours or the repo's, can widen what it may do, even if its guard failed to load. The cost: your settings' hooks (a secret-output hook, say) and deny rules don't run inside the helper, and it can't read files outside the folder that your chat mentions. Plugins still load.
 - The helper uses the chat's model. Its tool list differs from the chat's, so the prompt cache only partly carries over.
 
 ## Develop
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 19 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 20 tests; the flows run on the terminal and desktop surfaces
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
 ```
 

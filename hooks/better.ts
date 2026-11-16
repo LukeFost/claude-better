@@ -79,6 +79,8 @@ export function handOverText(improved: string, draft: string): string {
 // ---- The helper process: a headless `claude -p` on a fork of this session, which is never saved. ----
 
 export const HELPER_ENV = 'CLAUDE_BETTER_HELPER'
+// The helper's guard writes this file when it loads; a run without it is refused (see runHelper).
+export const GUARD_ENV = 'CLAUDE_BETTER_GUARD_FILE'
 export const HELPER_TOOLS = ['Read', 'Grep', 'Glob', 'Bash'] as const
 export const HELPER_TIMEOUT_MS = 20 * 60 * 1000
 
@@ -110,6 +112,9 @@ export function helperArgv(opts: { claude: string; sessionId?: string; model?: s
     // Nothing prompts in the background: whatever would ask is refused, and this mod's guard (loaded with
     // --plugin-dir, switched on by HELPER_ENV) refuses every call that is not a read.
     '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
+    // No settings files: no allow rules from the user or the repo can widen dontAsk, so even a helper whose guard
+    // failed to load can only read inside the working folder.
+    '--setting-sources', '',
     '--strict-mcp-config',
     ...(opts.model ? ['--model', opts.model] : []),
     '--plugin-dir', opts.pluginRoot,
@@ -120,9 +125,11 @@ export function helperArgv(opts: { claude: string; sessionId?: string; model?: s
 
 // The helper's guard. Read, Grep and Glob are reads; Bash only where Claude Code's own read-only check holds the
 // command read-only (`ls`, `cat`, `grep`, `git log`), which is stricter than pi-better's prompt-only rule.
-export function helperVerdict(tool: string, isReadOnly: boolean | undefined): { decision: 'allow' } | { decision: 'deny'; reason: string } {
-  if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return { decision: 'allow' }
-  if (tool === 'Bash' && isReadOnly) return { decision: 'allow' }
+// A read is never allowed outright: it passes on to Claude Code, whose dontAsk scope (the working folder), deny
+// rules and other hooks still decide it. The guard only ever narrows.
+export function helperVerdict(tool: string, isReadOnly: boolean | undefined): { decision: 'pass' } | { decision: 'deny'; reason: string } {
+  if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return { decision: 'pass' }
+  if (tool === 'Bash' && isReadOnly) return { decision: 'pass' }
   const why = tool === 'Bash' ? 'that command is not read-only' : `${tool} is off`
   return { decision: 'deny', reason: `/better's helper only reads and rewrites, so ${why}. Use Read, Grep, Glob or a read-only Bash command.` }
 }
@@ -220,10 +227,10 @@ export class StreamReader {
   }
 }
 
-export function helperExitError(code: number | null, signal: string | null, stderr: string): string {
-  const how = code === null ? `was stopped by ${signal}` : `exited with code ${code}`
-  const tail = stderr.trim().split('\n').slice(-3).join(' ')
-  return tail ? `The helper ${how}: ${tail}` : `The helper ${how} without printing an error`
+// stderr stays in the run record (mode 0600): it can hold anything the helper printed, so it never goes into a
+// message an agent or a toast shows.
+export function helperExitError(code: number | null, signal: string | null): string {
+  return `The helper ${code === null ? `was stopped by ${signal}` : `exited with code ${code}`}`
 }
 
 // One per question, in helper.md's order.

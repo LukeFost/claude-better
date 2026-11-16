@@ -17,10 +17,10 @@ test("the improved prompt goes above the person's draft, and the draft survives"
   expect(handOverText('Improved.', '  half-typed note ')).toBe('Improved.\n\nhalf-typed note')
 })
 
-test('the helper only reads: file reads pass, writes and non-read-only Bash are refused', () => {
-  expect(helperVerdict('Read', undefined)).toEqual({ decision: 'allow' })
-  expect(helperVerdict('Grep', undefined)).toEqual({ decision: 'allow' })
-  expect(helperVerdict('Bash', true)).toEqual({ decision: 'allow' })
+test('the helper only reads: reads pass on to Claude Code, never allowed outright; writes are refused', () => {
+  expect(helperVerdict('Read', undefined)).toEqual({ decision: 'pass' })
+  expect(helperVerdict('Grep', undefined)).toEqual({ decision: 'pass' })
+  expect(helperVerdict('Bash', true)).toEqual({ decision: 'pass' })
   expect(helperVerdict('Bash', undefined).decision).toBe('deny')
   for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent', 'mcp__claude_ai_Gmail__send_message', 'WebFetch']) {
     expect(helperVerdict(tool, true).decision).toBe('deny')
@@ -33,6 +33,8 @@ test('the helper is a never-saved fork with read tools, and the task never rides
   expect(argv[argv.indexOf('--resume') + 1]).toBe('abc')
   expect(argv).toContain('--no-session-persistence')
   expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('dontAsk')
+  // No settings files, so no allow rule (the user's or the repo's) widens dontAsk if the guard is missing.
+  expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('')
   expect(argv[argv.indexOf('--plugin-dir') + 1]).toBe('/mods/better')
   // --tools is variadic: last, so nothing after it is swallowed.
   expect(argv.slice(-2)).toEqual(['--tools', 'Read,Grep,Glob,Bash'])

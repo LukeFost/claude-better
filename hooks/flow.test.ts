@@ -19,7 +19,7 @@ const reply = (body: string) =>
 
 type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
-  files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string
+  files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean
 }
 
 // Stands for the engine beneath the plugin. `seen` records what the plugin asked of it; `at.surface` is the
@@ -51,7 +51,14 @@ function world(on: any, opts: Opts) {
     if (!names) throw new Error(`ENOENT: ${e.path}`)
     return { value: names.map((name) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }
   })
-  on('fs.write', (_: any, e: any) => (seen.writes.push(e.path), { value: undefined }))
+  const written = new Map<string, string>()
+  on('fs.write', (_: any, e: any) => (seen.writes.push(e.path), written.set(e.path, e.text), { value: undefined }))
+  on('fs.read', (_: any, e: any) => {
+    if (!written.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+    return { value: written.get(e.path) }
+  })
+  // Claude Code's own verdict beneath the plugin's guard.
+  on('tool.check', () => ({ decision: 'allow', reason: 'core decides' }))
   on('prompt.read', () => ({ value: { text: opts.draft ?? '', cursor: 0 } }))
   on('prompt.fill', (_: any, e: any) => (seen.filled.push(e.text), { isFilled: true }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
@@ -62,6 +69,8 @@ function world(on: any, opts: Opts) {
   on('tool.call', { tool: 'Agent' }, (_: any, e: any) => (seen.agentRan.push(e.prompt), { result: 'subagent done' }))
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
+    // A helper whose guard loaded writes the proof the parent checks.
+    if (!opts.isGuardless) written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
     if (opts.hang) {
       await new Promise(() => {})
     }
@@ -89,7 +98,8 @@ test('a /better brief is checked first, and the subagent starts with the checked
     expect(seen.spawned).toHaveLength(1)
     expect(seen.spawned[0].argv[0]).toBe('/usr/local/bin/claude')
     expect(seen.spawned[0].input).toContain('## Brief to check\n\nFix the bug we found in foo.')
-    expect(seen.spawned[0].env).toEqual({ CLAUDE_BETTER_HELPER: '1' })
+    expect(seen.spawned[0].env.CLAUDE_BETTER_HELPER).toBe('1')
+    expect(seen.spawned[0].env.CLAUDE_BETTER_GUARD_FILE).toMatch(/^\/home\/me\/.claude\/better\/runs\/.*-brief-.*\.json$/)
     expect(seen.agentRan).toEqual(['Fix foo in src/foo.ts:12; done when `npm test` passes.'])
     expect('deny' in r && r.deny).toBeFalsy()
   })
@@ -101,6 +111,9 @@ test('a failed brief check launches no subagent and keeps a run log', async ($, 
     const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
     expect(seen.agentRan).toEqual([])
     expect(JSON.stringify(r)).toContain("didn't start")
+    // stderr stays in the run record; the agent gets the log path, never the text.
+    expect(JSON.stringify(r)).not.toContain('model unavailable')
+    expect(JSON.stringify(r)).toContain('/home/me/.claude/better/runs/')
     expect(seen.writes.some((p) => p.startsWith('/home/me/.claude/better/runs/'))).toBe(true)
   })
 })
@@ -211,13 +224,28 @@ test('with no claude at all, /better fails loudly with the fix and starts nothin
   })
 })
 
-test('inside the helper, the guard refuses writes and allows reads', async ($, on) => {
-  world(on, { env: { CLAUDE_BETTER_HELPER: '1' } })
+test('inside the helper, the guard writes its proof, refuses writes and leaves reads to Claude Code', async ($, on) => {
+  const seen = world(on, { env: { CLAUDE_BETTER_HELPER: '1', CLAUDE_BETTER_GUARD_FILE: '/home/me/.claude/better/runs/r.json' } })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(seen.writes).toEqual(['/home/me/.claude/better/runs/r.json'])
   const edit = await $.tool.check({ tool: 'Edit', input: { file_path: 'a', old_string: 'x', new_string: 'y' } } as any)
   expect(edit.decision).toBe('deny')
   const bashWrite = await $.tool.check({ tool: 'Bash', input: { command: 'touch zz' } } as any)
   expect(bashWrite.decision).toBe('deny')
-  const read = await $.tool.check({ tool: 'Read', input: { file_path: 'README.md' } } as any)
-  expect(read.decision).toBe('allow')
+  // A read is never allowed by the guard: it reaches Claude Code's own check (the stand-in beneath it).
+  const read = await $.tool.check({ tool: 'Read', input: { file_path: '/home/me/.ssh/id_ed25519' } } as any)
+  expect(read.reason).toBe('core decides')
+})
+
+test('a helper whose guard never loaded is refused, so nothing it wrote is used', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Unguarded prompt.'), isGuardless: true })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.filled).toEqual([])
+    expect(seen.toasts.some((t) => t.includes("read-only guard didn't load"))).toBe(true)
+    const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
+    expect(seen.agentRan).toEqual([])
+    expect(JSON.stringify(r)).toContain("guard didn't load")
+  })
 })

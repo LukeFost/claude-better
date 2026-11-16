@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
-  BRIEF_MARK, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  BRIEF_MARK, GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
   desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, parseMarkedPrompt, stageOf,
 } from './better'
 
@@ -65,7 +65,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   let checked: string | undefined
   try {
     if (!claude) throw new Error(NO_CLAUDE)
-    const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1' }, input: req.task })
+    // The helper's guard writes the run record's first version when it loads (see session.start).
+    const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input: req.task })
     for (;;) {
       const pending = child.next()
       pending.catch(() => {})
@@ -86,7 +87,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     if (stop.signal.aborted) {
       cancelled = stop.signal.reason !== 'timeout'
       error = cancelled ? 'cancelled' : `The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`
-    } else if (exit && exit.code !== 0) error = helperExitError(exit.code, exit.signal, stderr)
+    } else if (exit && exit.code !== 0) error = `${helperExitError(exit.code, exit.signal)}; its stderr is in ${log}`
     else if (reader.resultError) error = `The helper's model call failed: ${reader.resultError}`
     else if (!reader.reply.trim()) error = 'The helper finished without replying'
     else {
@@ -102,9 +103,15 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     timer.cancel()
     req.signal.removeEventListener('abort', onAbort)
   }
+  // Fail closed: a helper whose guard never loaded ran unguarded, so its result is not used.
+  const isGuarded = await $.fs.read(log).then((t) => JSON.parse(t)?.isGuardLoaded === true).catch(() => false)
+  if (exit && !isGuarded && !error) {
+    checked = undefined
+    error = `The helper's read-only guard didn't load, so its result was not used. Check that ${$.plugin.root}/hooks/register.tsx loads (claude plugin validate), then try again.`
+  }
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
-    kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled,
+    kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
     error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map((t) => `${t.state} ${t.label}`),
     reply: reader.reply, checked,
   }
@@ -125,7 +132,8 @@ async function handOver($: EngineInterface, improved: string, surface?: 'termina
 }
 
 // Module state: a reload starts it over, and the reload kills any helper child with the old module.
-const S: { isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; boomAgent?: string } = { isHelper: false }
+// forks: every /better-boomerang fork this module started. A fork stays guarded for its whole life, after Back too.
+const S: { isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string> } = { isHelper: false, forks: new Set() }
 
 function startTicker($: EngineInterface): void {
   S.ticker ??= $.clock.every(1000, () => void update($, tickA, (n) => (n ?? 0) + 1))
@@ -145,7 +153,6 @@ async function back($: EngineInterface, surface?: 'terminal' | 'desktop' | 'vsco
   if (viewed.deny && boom.isViewed !== false) return `Couldn't switch back to the main conversation: ${viewed.deny}`
   await handOver($, boom.improved, surface)
   await update($, boomA, () => null)
-  S.boomAgent = undefined
   return undefined
 }
 
@@ -163,8 +170,13 @@ async function checkBrief($: EngineInterface, brief: string, cwd: string | undef
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     S.isHelper = (await $.env.get('CLAUDE_BETTER_HELPER')) === '1'
+    if (S.isHelper) {
+      // The proof the parent waits for: written before the helper's first turn, so it means tool.check is in place.
+      const proof = await $.env.get('CLAUDE_BETTER_GUARD_FILE')
+      if (proof) await $.fs.write(proof, JSON.stringify({ isGuardLoaded: true }))
+      return next(e)
+    }
     const started = await next(e)
-    if (S.isHelper) return started
     await $.command.register({ name: 'better', description: 'Deepen a prompt (or the current task) with a read-only helper in the background, then put the improved prompt in your input box', argumentHint: '[prompt]' })
     await $.command.register({ name: 'better-cancel', description: 'Stop the /better helper that is running; nothing is sent' })
     await $.command.register({ name: 'better-boomerang', description: 'Watch a read-only fork of this chat deepen a prompt (or the current task), then come back with it in your input box', argumentHint: '[prompt]' })
@@ -193,11 +205,11 @@ export const register: Register = (on) => {
 
   // The helper's own guard (inside the helper process), and the boomerang fork's (in this one).
   on('tool.check', async ($, e, next) => {
-    const guarded = S.isHelper || (e.agentId !== undefined && e.agentId === (S.boomAgent ??= (await read($, boomA))?.agentId))
-    if (!guarded) return next(e)
+    if (!S.isHelper && !(e.agentId !== undefined && S.forks.has(e.agentId))) return next(e)
     const verdict = helperVerdict(e.tool, e.isReadOnly)
-    return verdict.decision === 'allow' ? { decision: 'allow', reason: '/better helper read' } : { decision: 'deny', reason: verdict.reason }
-  }).catch(($, e, next) => (S.isHelper ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)))
+    // A read goes on to Claude Code's own checks (dontAsk's folder scope, deny rules, other hooks); never allowed here.
+    return verdict.decision === 'pass' ? next(e) : { decision: 'deny', reason: verdict.reason }
+  }).catch(($, e, next) => (S.isHelper || (e.agentId !== undefined && S.forks.has(e.agentId)) ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)))
 
   // ---- /better ----
   on('command.run', { command: 'better' }, async ($, e) => {
@@ -253,7 +265,7 @@ export const register: Register = (on) => {
       if (/auto mode/i.test(deny)) return { text: "/better-boomerang can't start its fork in auto mode, which only starts an agent the model asks for. Switch to another permission mode (the mode menu under the input box in the desktop app, shift+tab in the terminal) and run it again, or use /better, which needs no fork." }
       return { text: `/better-boomerang couldn't start its fork: ${deny}` }
     }
-    S.boomAgent = spawned.agentId
+    S.forks.add(spawned.agentId)
     await update($, boomA, () => ({ agentId: spawned.agentId!, startedAt: Date.now(), status: 'running' }))
     startTicker($)
     const viewed = await $.ui.view({ agentId: spawned.agentId })
@@ -272,8 +284,7 @@ export const register: Register = (on) => {
       $.ui.toast(`/better-boomerang failed: ${(err as Error).message} Its reply stays in the fork's transcript.`, { timeoutMs: 15000 })
     }
     await update($, boomA, () => (improved ? { ...boom, status: 'ready' as const, improved } : null))
-    if (!improved) S.boomAgent = undefined
-    else $.ui.toast('/better-boomerang is done: press "Back with prompt" above the prompt, or /better-back.', { timeoutMs: 10000 })
+    if (improved) $.ui.toast('/better-boomerang is done: press "Back with prompt" above the prompt, or /better-back.', { timeoutMs: 10000 })
     await stopTickerIfIdle($)
     return next(e)
   })
