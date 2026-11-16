@@ -54,6 +54,23 @@ Start a new Claude Code session, in the terminal or in the Claude desktop app's 
 | A `/better` subagent brief is checked with brief.md, and a failure blocks the start | The same, on the `Agent` tool. A failure, a cancel or a reply with no marked brief refuses the call, so no subagent starts. |
 | `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
 
+## Cursor
+
+The same `/better` works as a skill for Cursor's agent, in the desktop app and in `cursor-agent`. It runs the same read-only `claude -p` helper with the same guard, so it needs the `claude` CLI, signed in, and Node 23.6 or later (it runs `run-helper.ts` directly).
+
+```sh
+git clone https://github.com/LukeFost/claude-better ~/claude-better   # or use an existing clone
+ln -s ~/claude-better/cursor/skills/better ~/.cursor/skills/better
+```
+
+Then type `/better <prompt>` in a Cursor chat, or start a subagent prompt with `/better `. How it differs from the plugin:
+
+- The helper can't fork the Cursor chat, so the agent writes what the chat established into the helper's input.
+- The improved prompt is shown once in the chat and put on the clipboard; Cursor has no input box a skill can fill.
+- Cancel means stopping the shell command; the helper stops with it and nothing is produced.
+- There is no `/better-boomerang` or `check_brief` tool.
+- Run records go to `~/.claude/better/runs` with `"from": "cursor"`.
+
 ## Limits
 
 - **Esc does not cancel `/better`.** A mod can't take the first Esc from the prompt box. Use `/better-cancel` or the band's `cancel` button. Esc does cancel an agent's brief check, because it interrupts the turn that is waiting on it.

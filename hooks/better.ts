@@ -178,7 +178,13 @@ export class StreamReader {
   resultError: string | undefined
   sawResult = false
   private buffered = ''
-  constructor(private cwd: string, private home: string) {}
+  // Plain fields, not parameter properties, so Node can run this file by stripping types (the Cursor skill does).
+  private cwd: string
+  private home: string
+  constructor(cwd: string, home: string) {
+    this.cwd = cwd
+    this.home = home
+  }
 
   push(chunk: string): boolean {
     const lines = (this.buffered + chunk).split('\n')
