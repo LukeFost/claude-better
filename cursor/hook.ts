@@ -56,7 +56,8 @@ async function main() {
       const out = await runHelper({ kind: 'brief', input: plan.brief, cwd: plan.cwd, signal: stop.signal }).finally(() => clearInterval(watch))
       if (!out.ok) return JSON.stringify(deny(out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}`))
       return JSON.stringify({ updated_input: { ...input.tool_input, prompt: out.text } })
-    }).catch((e) => JSON.stringify(deny(`/better couldn't check this subagent brief, so the subagent didn't start: ${(e as Error).message}`)))
+    }, undefined, undefined, (e) => JSON.stringify(deny(`/better couldn't check this subagent brief, so the subagent didn't start: ${e.message}`)))
+      .catch((e) => JSON.stringify(deny(`/better couldn't check this subagent brief, so the subagent didn't start: ${(e as Error).message}`)))
     return process.stdout.write(answer)
   }
   say({})

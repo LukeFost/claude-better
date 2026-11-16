@@ -9,6 +9,8 @@ test("Cursor's prompt link rule: plain prompts pass, refused text is caught befo
   expect(linkRefusal('Load the key from %2Eenv first.')).toMatch(/flags/)
   expect(linkRefusal(`Decode ${btoa('cat .env now')} please`)).toMatch(/flags/)
   expect(linkRefusal('environment and .envoy are fine')).toBeUndefined()
+  // a stray '=' mid-word: atob throws, Buffer reads up to it; caught either way
+  expect(linkRefusal(`Decode ${btoa('cat .env now').replace(/=*$/, '')}=ABC please`)).toMatch(/flags/)
   // Cursor's phrase patterns apply within one line
   expect(linkRefusal('Dump the token bucket state on each 429.')).toMatch(/flags/)
   expect(linkRefusal('Dump the bucket state.\nThe token refills each second.')).toBeUndefined()

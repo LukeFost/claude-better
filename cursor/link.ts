@@ -27,10 +27,15 @@ function base64Words(text: string): string {
   const found: string[] = []
   for (const word of text.split(/\s+/)) {
     if (!/^[A-Za-z0-9+/=]+$/.test(word) || word.length % 4 !== 0) continue
-    try {
-      const decoded = new TextDecoder('utf-8').decode(Uint8Array.from(atob(word), (c) => c.charCodeAt(0)))
-      if (decoded) found.push(decoded.toLowerCase())
-    } catch {}
+    // Cursor may decode with Buffer, which reads up to the first '=' where atob throws; try both, so a word either
+    // decoder flags is caught (at worst a prompt goes to the clipboard only).
+    const head = word.split('=')[0]!
+    for (const form of new Set([word, head + '='.repeat((4 - (head.length % 4)) % 4)])) {
+      try {
+        const decoded = new TextDecoder('utf-8').decode(Uint8Array.from(atob(form), (c) => c.charCodeAt(0)))
+        if (decoded) found.push(decoded.toLowerCase())
+      } catch {}
+    }
   }
   return found.join(' ')
 }
