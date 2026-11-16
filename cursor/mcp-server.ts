@@ -113,6 +113,8 @@ function openInNewChat(text: string): boolean {
 async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
   const isBrief = name === 'check_brief'
   const body = String((isBrief ? args?.brief : args?.prompt) ?? '').replace(/^\/better(\s|$)/, '').trim()
+  // The app starts one server before any workspace is open, so the roots are asked for again at each call.
+  if (supportsRoots) await askRoots()
   const where = helperCwd(args?.cwd)
   if ('error' in where) return { isError: true, content: [{ type: 'text', text: `/better refused: ${where.error}${isBrief ? ' Do not start the subagent with the unchecked brief.' : ''}` }] }
   const cwd = where.cwd
@@ -153,7 +155,13 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
   const { id, method, params } = msg
   if (id === 'better-roots' && method === undefined) {
     const roots = Array.isArray(msg.result?.roots) ? msg.result.roots : []
-    rootsPending?.(roots.flatMap((r: any) => (typeof r?.uri === 'string' && r.uri.startsWith('file:') ? [fileURLToPath(r.uri)] : [])))
+    // Cursor 3.30 sends a plain path where the spec says a file:// URI; take both.
+    rootsPending?.(roots.flatMap((r: any) => {
+      const uri = r?.uri
+      if (typeof uri !== 'string') return []
+      if (uri.startsWith('file:')) return [fileURLToPath(uri)]
+      return isAbsolute(uri) ? [uri] : []
+    }))
     rootsPending = undefined
     return
   }
