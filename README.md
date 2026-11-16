@@ -4,6 +4,40 @@
 
 `/better` puts a deeper version of your prompt in your input box. It builds it from your own code, files and logs, and never sends anything. An agent can also have a subagent's brief checked against the repo before the subagent starts.
 
+## Install
+
+<table>
+<tr><th>Claude Code (terminal or the desktop app's Code tab)</th><th>Cursor (desktop app or <code>cursor-agent</code>)</th></tr>
+<tr><td>
+
+```sh
+claude plugin marketplace add LukeFost/claude-better
+claude plugin install better@claude-better
+```
+
+</td><td>
+
+```sh
+git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/better
+```
+
+</td></tr>
+<tr><td>Start a new session, then type <code>/better &lt;your prompt&gt;</code>. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<td>Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. Needs the <code>claude</code> CLI, signed in, and Node 23.6 or later. If the Claude Code plugin is already installed, skip the clone: Cursor imports it, and two copies run every hook twice. See <a href="#cursor">Cursor</a>.</td></tr>
+</table>
+
+## Use
+
+| Want | Do |
+|---|---|
+| Deepen a prompt | `/better <prompt>` |
+| Deepen the task in progress, including your feedback so far | `/better` |
+| Stop it | `/better-cancel`, or press `cancel` in the band above the prompt (click it in the desktop app; in the terminal, ctrl+x tab, then Enter) |
+| Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back`. Not in auto mode. The desktop app can't show the fork in the main view, so there it runs in the background and its row in the chat says when it's done. |
+| An agent checks a brief before a new thread or subagent | the `mcp__better__check_brief` tool, or an Agent prompt that starts with `/better ` |
+
+![/better in a Claude Code terminal session: the band shows the helper reading the ledger fixture's files, then the deeper prompt lands in the input box](docs/better.gif)
+
 ## Why
 
 Felix Rieseberg, who works on Claude at Anthropic, argues in [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/) that most of us ask models for too little. One of his four kinds of ambition is depth: "Considering a task the way a field-leading expert would ... we go one level deeper and touch the underlying data, tools, and problems."
@@ -24,25 +58,6 @@ A real run on a small fixture repo (a retry module, a 429 log and two tests):
 >
 > Done means: `python3 -m pytest tests/` passes, with `tests/test_rate_limit.py` updated (it currently pins `MAX_RETRIES == 5`); a new test that replays the logged burst (6 429s, then a 200) against a fake server with an injected clock [...]
 
-## Install
-
-```sh
-claude plugin marketplace add LukeFost/claude-better
-claude plugin install better@claude-better
-```
-
-Start a new Claude Code session, in the terminal or in the Claude desktop app's Code tab, then type `/better <your prompt>`. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.
-
-## Use
-
-| Want | Do |
-|---|---|
-| Deepen a prompt | `/better <prompt>` |
-| Deepen the task in progress, including your feedback so far | `/better` |
-| Stop it | `/better-cancel`, or press `cancel` in the band above the prompt (click it in the desktop app; in the terminal, ctrl+x tab, then Enter) |
-| Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back`. Not in auto mode. The desktop app can't show the fork in the main view, so there it runs in the background and its row in the chat says when it's done. |
-| An agent checks a brief before a new thread or subagent | the `mcp__better__check_brief` tool, or an Agent prompt that starts with `/better ` |
-
 ## How it maps from Pi
 
 | pi-better | This mod |
@@ -52,22 +67,18 @@ Start a new Claude Code session, in the terminal or in the Claude desktop app's 
 | The prompt goes above your draft | The same, using `$.prompt.read` and `$.prompt.fill`. If the box can't take it, the prompt goes on the clipboard. |
 | `/better-boomerang`: runs in the chat, then `navigateTree` back | A read-only fork subagent shown in the main view (`$.ui.view`). Back is one press or `/better-back`. The main conversation never sees the research. |
 | A `/better` subagent brief is checked with brief.md, and a failure blocks the start | The same, on the `Agent` tool. A failure, a cancel or a reply with no marked brief refuses the call, so no subagent starts. |
-| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
+| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. Only the newest 200 are kept. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
 
 ## Cursor
 
 The same `/better` works in Cursor's agent, in the desktop app and in `cursor-agent`, as a Cursor plugin. It gives the agent two tools, `better` and `check_brief`, plus a skill that tells it when to use them. They run the same read-only `claude -p` helper with the same guard, so it needs the `claude` CLI, signed in, and Node 23.6 or later.
 
-```sh
-git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/better
-```
-
-If the Claude Code plugin is already installed, Cursor imports it from Claude Code, so skip the clone: two copies run every hook twice. Otherwise, reload Cursor and type `/better <prompt>` in a chat, or start a subagent prompt with `/better `. For `cursor-agent`, add `--plugin-dir ~/.cursor/plugins/local/better`. To update, `git pull` in that folder; to remove, use Remove in Cursor's plugin settings or delete the folder.
+Install it with the clone under [Install](#install). If the Claude Code plugin is already installed, Cursor imports it from Claude Code, so skip the clone: two copies run every hook twice. Otherwise, reload Cursor and type `/better <prompt>` in a chat, or start a subagent prompt with `/better `. For `cursor-agent`, add `--plugin-dir ~/.cursor/plugins/local/better`. To update, `git pull` in that folder; to remove, use Remove in Cursor's plugin settings or delete the folder.
 
 How it differs from the Claude Code plugin:
 
 - The helper can't fork the Cursor chat, so the agent passes what the chat established along with the prompt.
-- The stages show on the tool card. When it's done, Cursor's prompt link offers the improved prompt in a "Create chat with prompt" dialog and it goes on the clipboard. Click Create Chat to start a chat with it, or Cancel. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
+- The stages show on the tool card. When it's done, Cursor's prompt link offers the improved prompt in a "Create chat with prompt" dialog, and your clipboard is left alone. Click Create Chat to start a chat with it, or Cancel. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
 - Cancel with Cursor's stop button: the plugin's `stop` hook stops the helper and nothing is produced. Cursor tells the MCP server nothing, so the hook leaves a marker in `~/.claude/better/cursor-stops` that the server checks; a stop in the same workspace also cancels a run in another chat there.
 - A subagent prompt that starts with `/better ` is checked by the plugin's `preToolUse` hook, which swaps in the checked brief, or refuses the start if the check fails.
 - `cursor-agent` gives up on an MCP call after 60 seconds, so a longer `/better` run fails there with "Request timed out".
@@ -94,8 +105,9 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 22 tests; the flows run on the terminal and desktop surfaces
-node --test 'cursor/*.node-test.ts'   # the Cursor hooks (plain Node)
+claude plugin test .     # 24 tests; the flows run on the terminal and desktop surfaces
+node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
+npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
 ```
 
