@@ -29,7 +29,9 @@ function base64Words(text: string): string {
     if (!/^[A-Za-z0-9+/=]+$/.test(word) || word.length % 4 !== 0) continue
     // Cursor may decode with Buffer, which reads up to the first '=' where atob throws; try both, so a word either
     // decoder flags is caught (at worst a prompt goes to the clipboard only).
-    const head = word.split('=')[0]!
+    // Buffer also drops a dangling character (a head one longer than a multiple of 4).
+    let head = word.split('=')[0]!
+    if (head.length % 4 === 1) head = head.slice(0, -1)
     for (const form of new Set([word, head + '='.repeat((4 - (head.length % 4)) % 4)])) {
       try {
         const decoded = new TextDecoder('utf-8').decode(Uint8Array.from(atob(form), (c) => c.charCodeAt(0)))

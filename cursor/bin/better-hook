@@ -1,3 +1,16 @@
 #!/bin/sh
-# Runs a /better Cursor hook (stdin: the hook JSON).
-exec "$(dirname "$0")/run-ts" hook.ts
+# Runs a /better Cursor hook (stdin: the hook JSON). The preToolUse hook fails closed, so with no usable Node it must
+# still let every call through except a /better subagent brief, which it refuses with the fix.
+input=$(cat)
+out=$(printf '%s' "$input" | "$(dirname "$0")/run-ts" hook.ts)
+code=$?
+if [ "$code" -eq 3 ]; then
+  if printf '%s' "$input" | grep -Eq '"prompt"[[:space:]]*:[[:space:]]*"([[:space:]]|\\[nrt])*/better([[:space:]"]|\\[nrt])'; then
+    echo '{"permission":"deny","user_message":"/better needs Node 23.6 or later, so the /better subagent brief was not checked and the subagent did not start.","agent_message":"/better could not check this subagent brief (no Node 23.6 or later). Do not start the subagent with the unchecked brief."}'
+  else
+    echo '{}'
+  fi
+  exit 0
+fi
+printf '%s' "$out"
+exit "$code"
