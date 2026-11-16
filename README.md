@@ -67,7 +67,7 @@ Then reload Cursor and type `/better <prompt>` in a chat, or start a subagent pr
 How it differs from the Claude Code plugin:
 
 - The helper can't fork the Cursor chat, so the agent passes what the chat established along with the prompt.
-- The stages show on the tool card. When it's done, Cursor's prompt link offers the improved prompt in a "Create chat with prompt" dialog, without taking focus from another app, and it goes on the clipboard. Click Create Chat to start a chat with it, or Cancel. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
+- The stages show on the tool card. When it's done, Cursor's prompt link offers the improved prompt in a "Create chat with prompt" dialog and it goes on the clipboard. Click Create Chat to start a chat with it, or Cancel. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
 - Cancel with Cursor's stop button: the helper stops and nothing is produced.
 - There is no `/better-boomerang`.
 - Run records go to `~/.claude/better/runs` with `"from": "cursor"`.
