@@ -19,7 +19,9 @@ const real = (p: string) => {
 
 /** A folder the helper may treat as a workspace: not /, not the home folder and not a folder that holds it. */
 export function isWorkspaceRoot(root: string, home = process.env.HOME ?? ''): boolean {
-  return !!root && !isInside(real(home), [real(root)])
+  const r = real(root)
+  if (!root || r === '/') return false
+  return !home || !isInside(real(home), [r]) // an unset HOME is no home, not the current folder
 }
 
 /** Records that the user stopped a turn in these workspace folders. */

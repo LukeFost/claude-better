@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { planBrief } from './hook.ts'
-import { recordStop, runOnce, stoppedSince } from './stops.ts'
+import { isWorkspaceRoot, recordStop, runOnce, stoppedSince } from './stops.ts'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 
 test("Cursor's stop button: a stop marker cancels runs in that workspace that began before it, and nothing else", () => {
@@ -65,6 +65,8 @@ test('a folder that holds the home folder is never a workspace: no brief check t
   assert.ok('deny' in plan([home]))
   assert.deepEqual(plan([ws]), { brief: 'do it', cwd: ws })
   assert.deepEqual(plan([top, ws]), { brief: 'do it', cwd: ws })
+  assert.equal(isWorkspaceRoot('/', ''), false)
+  assert.equal(isWorkspaceRoot(ws, ''), true) // an empty HOME is not the current folder
   const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
   recordStop([top], dir, 1, home)
   recordStop([home], dir, 1, home)
