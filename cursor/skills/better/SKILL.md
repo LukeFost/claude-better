@@ -18,9 +18,10 @@ The `better` MCP tools run a read-only helper that reads the code a prompt touch
 
 ## Subagent briefs ("/better " at the start)
 
-Before starting a subagent whose prompt starts with `/better `, call `check_brief` with the brief (without the mark), `cwd`, and `context` only if the brief points at things this chat decided. Start the subagent with the returned brief verbatim. If the check fails, don't start the subagent; say why.
+Before starting a subagent whose prompt starts with `/better `, call `check_brief` with the brief (without the mark), `cwd`, and `context` only if the brief points at things this chat decided. Start the subagent with the returned brief verbatim. If the check fails, don't start the subagent; say why. If you start one with the mark anyway, the plugin's hook checks the brief first and swaps in the checked one, or refuses the start.
 
 ## Notes
 
-- Cancel with Cursor's stop button: the helper stops and nothing is produced.
-- The helper needs the `claude` CLI, signed in. If the tools are missing, the plugin isn't loaded; the README says how to install it.
+- Cancel with Cursor's stop button: the plugin's stop hook stops the helper and nothing is produced.
+- The helper needs the `claude` CLI, signed in.
+- If the `better` tools are missing, say that the better MCP server is off or not loaded (Customize > MCPs > better: turn it on, or Reload) and stop. Don't investigate further or deepen the prompt yourself.

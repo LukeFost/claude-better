@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [{ "command": "${CURSOR_PLUGIN_ROOT}/cursor/bin/better-hook" }],
+    "preToolUse": [{ "command": "${CURSOR_PLUGIN_ROOT}/cursor/bin/better-hook", "matcher": "Task", "timeout": 1260 }]
+  }
+}

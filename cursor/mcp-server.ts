@@ -1,7 +1,8 @@
 // The /better MCP server for Cursor (stdio, newline-delimited JSON-RPC). Two tools:
 //   better       deepen a prompt; the Cursor app offers the result in a "Create chat with prompt" dialog (its prompt link), and it goes to the clipboard
 //   check_brief  check a subagent brief; returns it to use verbatim
-// Progress shows on the tool card (notifications/progress), and Cursor's stop button cancels the helper.
+// Progress shows on the tool card (notifications/progress). Cursor's stop button cancels the helper through the
+// plugin's stop hook (cursor/stops.ts), since Cursor sends the server no notifications/cancelled.
 import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
@@ -10,6 +11,7 @@ import { createInterface } from 'node:readline'
 import { PLUGIN_ROOT, runHelper } from './helper.ts'
 import { isInside, outsideFolder } from '../hooks/better.ts'
 import { linkRefusal } from './link.ts'
+import { stoppedSince } from './stops.ts'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../.cursor-plugin/plugin.json', import.meta.url), 'utf8')).version
 
@@ -124,6 +126,9 @@ async function call(id: string | number, name: string, args: any, progressToken:
   const context = typeof args?.context === 'string' && args.context.trim() ? `\n\n## What this chat established\n\n${args.context.trim()}` : ''
   const stop = new AbortController()
   calls.set(id, stop)
+  // Cursor's stop button reaches only the plugin's stop hook, which leaves a marker for this workspace.
+  const since = Date.now()
+  const watch = setInterval(() => stoppedSince(cwd, since) && stop.abort(), 500)
   try {
     const out = await runHelper({
       kind: isBrief ? 'brief' : 'better', input: body + context, cwd, signal: stop.signal,
@@ -136,6 +141,8 @@ async function call(id: string | number, name: string, args: any, progressToken:
       return { isError: true, content: [{ type: 'text', text: isBrief ? `${text} Do not start the subagent with the unchecked brief.` : text }] }
     }
     if (isBrief) return { content: [{ type: 'text', text: out.text }] }
+    // Stopped after the helper's last word but before the hand-off: drop the result rather than pop a dialog.
+    if (stop.signal.aborted || stoppedSince(cwd, since)) return { isError: true, content: [{ type: 'text', text: '/better was cancelled; nothing was produced.' }] }
     const link = openInNewChat(out.text)
     const copied = toClipboard(out.text)
     const skipped = !link.opened && link.why ? ` Cursor's prompt link can't take it (${link.why}), so there is no dialog.` : ''
@@ -144,6 +151,7 @@ async function call(id: string | number, name: string, args: any, progressToken:
       : `${copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'}${skipped}`
     return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {
+    clearInterval(watch)
     calls.delete(id)
   }
 }

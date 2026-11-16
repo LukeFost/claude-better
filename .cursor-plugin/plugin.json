@@ -9,5 +9,6 @@
   "repository": "https://github.com/LukeFost/claude-better",
   "license": "MIT",
   "skills": "./cursor/skills/",
-  "mcpServers": "./cursor/mcp.json"
+  "mcpServers": "./cursor/mcp.json",
+  "hooks": "./cursor/hooks.json"
 }

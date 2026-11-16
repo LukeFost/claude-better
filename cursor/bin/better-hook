@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs a /better Cursor hook (stdin: the hook JSON).
+exec "$(dirname "$0")/run-ts" hook.ts
