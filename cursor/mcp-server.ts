@@ -9,10 +9,9 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { PLUGIN_ROOT, runHelper } from './helper.ts'
 import { isInside, outsideFolder } from '../hooks/better.ts'
+import { linkRefusal } from './link.ts'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../.cursor-plugin/plugin.json', import.meta.url), 'utf8')).version
-// Cursor's prompt link refuses text whose URL form is longer than this.
-const PROMPT_LINK_MAX = 10_000
 
 const TOOLS = [
   {
@@ -102,13 +101,15 @@ function toClipboard(text: string): boolean {
   return spawnSync('pbcopy', { input: text }).status === 0
 }
 
-function openInNewChat(text: string): boolean {
-  if (process.platform !== 'darwin' || !isCursorApp()) return false
+// Opens Cursor's prompt link, or says why not. Cursor shows no dialog for text its own rule refuses, so that text never goes to the link.
+function openInNewChat(text: string): { opened: true } | { opened: false; why?: string } {
+  if (process.platform !== 'darwin' || !isCursorApp()) return { opened: false }
+  const why = linkRefusal(text)
+  if (why) return { opened: false, why }
   const url = `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(text)}`
-  if (url.length > PROMPT_LINK_MAX) return false
   // -g: hand the link to Cursor without bringing it forward, so a user who switched apps mid-run keeps their focus.
   spawn('open', ['-g', url], { stdio: 'ignore', detached: true }).unref()
-  return true
+  return { opened: true }
 }
 
 async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
@@ -135,11 +136,12 @@ async function call(id: string | number, name: string, args: any, progressToken:
       return { isError: true, content: [{ type: 'text', text: isBrief ? `${text} Do not start the subagent with the unchecked brief.` : text }] }
     }
     if (isBrief) return { content: [{ type: 'text', text: out.text }] }
-    const opened = openInNewChat(out.text)
+    const link = openInNewChat(out.text)
     const copied = toClipboard(out.text)
-    const where = opened
+    const skipped = !link.opened && link.why ? ` Cursor's prompt link can't take it (${link.why}), so there is no dialog.` : ''
+    const where = link.opened
       ? `Cursor is offering it in a "Create chat with prompt" dialog${copied ? ', and it is on the clipboard' : ''}; nothing was sent.`
-      : copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'
+      : `${copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'}${skipped}`
     return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {
     calls.delete(id)
