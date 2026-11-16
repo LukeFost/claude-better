@@ -1,5 +1,15 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+// Every flow runs on both surfaces. The desktop app draws no main view, so `ui.view` refuses there, as the
+// real app does ("no main view here").
+const SURFACES = ['terminal', 'desktop'] as const
+type Surface = (typeof SURFACES)[number]
+
+const BAND = {
+  component: 'AbovePrompt',
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+} as any
+
 const reply = (body: string) =>
   [
     { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/repo/README.md' } }] } },
@@ -7,11 +17,24 @@ const reply = (body: string) =>
     { type: 'result', subtype: 'success', result: `(1) a\n(2) b\n(3) c\n\n<improved-prompt>\n${body}\n</improved-prompt>` },
   ].map((l) => JSON.stringify(l)).join('\n') + '\n'
 
-// Stands for the engine beneath the plugin. `spawned` records each helper launch.
-function world(on: any, opts: { helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string> }) {
+type Opts = {
+  helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
+  files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string
+}
+
+// Stands for the engine beneath the plugin. `seen` records what the plugin asked of it; `at.surface` is the
+// surface the current pass draws on.
+function world(on: any, opts: Opts) {
   const clock = mock.clock(on)
-  const seen = { clock, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[], writes: [] as string[] }
-  mock.env(on, { HOME: '/home/me', ...(opts.env ?? {}) })
+  const at = { surface: 'terminal' as Surface }
+  const seen = {
+    clock, at, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[],
+    writes: [] as string[], views: [] as any[], reset() {
+      for (const k of ['spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views'] as const) seen[k].length = 0
+    },
+  }
+  const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
+  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', ...(opts.env ?? {}) })
   on('command.register', () => ({ value: {} }))
   on('tool.register', () => ({ value: {} }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -19,11 +42,23 @@ function world(on: any, opts: { helperOut?: string; helperCode?: number; hang?: 
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.surface', () => ({ value: 'terminal' }))
+  on('session.version', () => ({ value: { version: '2.1.317', base: '2.1.317' } }))
+  on('session.surface', () => ({ value: at.surface }))
+  on('session.surfaces', () => ({ value: [at.surface] }))
+  on('fs.exists', (_: any, e: any) => ({ value: files.has(e.path) }))
+  on('fs.list', (_: any, e: any) => {
+    const names = opts.dirs?.[e.path]
+    if (!names) throw new Error(`ENOENT: ${e.path}`)
+    return { value: names.map((name) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }
+  })
   on('fs.write', (_: any, e: any) => (seen.writes.push(e.path), { value: undefined }))
   on('prompt.read', () => ({ value: { text: opts.draft ?? '', cursor: 0 } }))
   on('prompt.fill', (_: any, e: any) => (seen.filled.push(e.text), { isFilled: true }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
+  on('ui.view', (_: any, e: any) => (seen.views.push(e), { value: at.surface === 'terminal' ? {} : { deny: 'no main view here' } }))
+  // The kit can refuse a spawn but not start one: only the real engine sets a started agent's id, so the
+  // boomerang's started path is shown by the recordings in evidence/, not here.
+  if (opts.spawnDeny) on('agent.spawn', () => ({ deny: opts.spawnDeny }))
   on('tool.call', { tool: 'Agent' }, (_: any, e: any) => (seen.agentRan.push(e.prompt), { result: 'subagent done' }))
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
@@ -37,80 +72,148 @@ function world(on: any, opts: { helperOut?: string; helperCode?: number; hang?: 
   return seen
 }
 
-const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+// One pass per surface, each from a fresh start of the session on that surface.
+async function eachSurface($: any, seen: ReturnType<typeof world>, run: (surface: Surface) => Promise<void>) {
+  for (const surface of SURFACES) {
+    seen.at.surface = surface
+    seen.reset()
+    await $.session.start({ cwd: '/repo', surface, isInteractive: true })
+    await run(surface)
+  }
+}
 
 test('a /better brief is checked first, and the subagent starts with the checked brief', async ($, on) => {
   const seen = world(on, { helperOut: reply('Fix foo in src/foo.ts:12; done when `npm test` passes.') })
-  await start($)
-  const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix the bug we found in foo.' })
-  expect(seen.spawned).toHaveLength(1)
-  expect(seen.spawned[0].input).toContain('## Brief to check\n\nFix the bug we found in foo.')
-  expect(seen.spawned[0].env).toEqual({ CLAUDE_BETTER_HELPER: '1' })
-  expect(seen.agentRan).toEqual(['Fix foo in src/foo.ts:12; done when `npm test` passes.'])
-  expect('deny' in r && r.deny).toBeFalsy()
+  await eachSurface($, seen, async () => {
+    const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix the bug we found in foo.' })
+    expect(seen.spawned).toHaveLength(1)
+    expect(seen.spawned[0].argv[0]).toBe('/usr/local/bin/claude')
+    expect(seen.spawned[0].input).toContain('## Brief to check\n\nFix the bug we found in foo.')
+    expect(seen.spawned[0].env).toEqual({ CLAUDE_BETTER_HELPER: '1' })
+    expect(seen.agentRan).toEqual(['Fix foo in src/foo.ts:12; done when `npm test` passes.'])
+    expect('deny' in r && r.deny).toBeFalsy()
+  })
 })
 
 test('a failed brief check launches no subagent and keeps a run log', async ($, on) => {
   const seen = world(on, { helperCode: 1 })
-  await start($)
-  const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
-  expect(seen.agentRan).toEqual([])
-  expect(JSON.stringify(r)).toContain("didn't start")
-  expect(seen.writes.some((p) => p.startsWith('/home/me/.claude/better/runs/'))).toBe(true)
+  await eachSurface($, seen, async () => {
+    const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
+    expect(seen.agentRan).toEqual([])
+    expect(JSON.stringify(r)).toContain("didn't start")
+    expect(seen.writes.some((p) => p.startsWith('/home/me/.claude/better/runs/'))).toBe(true)
+  })
 })
 
 test('a reply with no marked brief launches no subagent', async ($, on) => {
   const seen = world(on, { helperOut: JSON.stringify({ type: 'result', subtype: 'success', result: 'I could not finish.' }) + '\n' })
-  await start($)
-  await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
-  expect(seen.agentRan).toEqual([])
+  await eachSurface($, seen, async () => {
+    await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
+    expect(seen.agentRan).toEqual([])
+  })
 })
 
 test('an unmarked Agent prompt goes straight through, with no helper', async ($, on) => {
   const seen = world(on, {})
-  await start($)
-  await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'Just do it.' })
-  expect(seen.spawned).toHaveLength(0)
-  expect(seen.agentRan).toEqual(['Just do it.'])
+  await eachSurface($, seen, async () => {
+    await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'Just do it.' })
+    expect(seen.spawned).toHaveLength(0)
+    expect(seen.agentRan).toEqual(['Just do it.'])
+  })
 })
 
 test('the check_brief tool returns the checked brief, and an error on failure', async ($, on) => {
   const seen = world(on, { helperOut: reply('Checked brief.') })
-  await start($)
-  const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
-  expect('result' in ok && ok.result).toBe('Checked brief.')
-  expect(seen.spawned[0].argv).toContain('--fork-session')
+  await eachSurface($, seen, async () => {
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in ok && ok.result).toBe('Checked brief.')
+    expect(seen.spawned[0].argv).toContain('--fork-session')
+  })
 })
 
 test("/better fills the box above the person's draft and sends nothing", async ($, on) => {
   const seen = world(on, { helperOut: reply('Deeper prompt.'), draft: 'my half-typed draft' })
-  const clock = seen.clock
-  await start($)
-  await $.command.run({ command: 'better', args: 'make errors clearer' } as any)
-  await clock.settle()
-  expect(seen.spawned[0].input).toContain('## Prompt to deepen\n\nmake errors clearer')
-  expect(seen.filled).toEqual(['Deeper prompt.\n\nmy half-typed draft'])
-  expect(seen.agentRan).toEqual([])
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'make errors clearer' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned[0].input).toContain('## Prompt to deepen\n\nmake errors clearer')
+    expect(seen.filled).toEqual(['Deeper prompt.\n\nmy half-typed draft'])
+    expect(seen.agentRan).toEqual([])
+  })
 })
 
 test('/better-cancel stops the helper and nothing is filled or sent', async ($, on) => {
   const seen = world(on, { hang: true, draft: 'keep me' })
-  const clock = seen.clock
-  await start($)
-  await $.command.run({ command: 'better', args: 'anything' } as any)
-  await clock.settle()
-  const again = await $.command.run({ command: 'better', args: 'second' } as any)
-  expect(again.text).toContain('already running')
-  const cancelled = await $.command.run({ command: 'better-cancel', args: '' } as any)
-  expect(cancelled.text).toContain('cancelled')
-  await clock.settle()
-  expect(seen.filled).toEqual([])
-  expect(seen.toasts.some((t) => t.includes('/better cancelled; nothing was sent'))).toBe(true)
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    const again = await $.command.run({ command: 'better', args: 'second' } as any)
+    expect(again.text).toContain('already running')
+    const cancelled = await $.command.run({ command: 'better-cancel', args: '' } as any)
+    expect(cancelled.text).toContain('cancelled')
+    await seen.clock.settle()
+    expect(seen.filled).toEqual([])
+    expect(seen.toasts.some((t) => t.includes('/better cancelled; nothing was sent'))).toBe(true)
+  })
+})
+
+test("the band's cancel button stops the helper", async ($, on) => {
+  const seen = world(on, { hang: true })
+  await eachSurface($, seen, async (surface) => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    const ui = await $.ui.mount({ plugin: 'better', surface, ...BAND })
+    expect(await ui.find({ type: 'Button', key: 'cancel' })).toBeDefined()
+    await ui.press({ key: 'cancel' })
+    await seen.clock.settle()
+    await ui.unmount()
+    expect(seen.filled).toEqual([])
+    expect(seen.toasts.some((t) => t.includes('/better cancelled; nothing was sent'))).toBe(true)
+  })
+})
+
+test('auto mode refusing the fork says how to go on, and nothing starts', async ($, on) => {
+  const seen = world(on, { spawnDeny: 'The server-side auto mode classifier gave no verdict for Agent: the request that produced this action did not ask for one.' })
+  await eachSurface($, seen, async () => {
+    const r = await $.command.run({ command: 'better-boomerang', args: 'x' } as any)
+    expect(r.text).toContain("can't start its fork in auto mode")
+    expect(seen.views).toEqual([])
+  })
+})
+
+test("the helper's claude is found off PATH, as a Dock-launched app has it", async ($, on) => {
+  const seen = world(on, { helperOut: reply('Checked.'), env: { PATH: '/usr/bin:/bin' }, files: ['/home/me/.local/bin/claude'] })
+  await eachSurface($, seen, async () => {
+    await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect(seen.spawned[0].argv[0]).toBe('/home/me/.local/bin/claude')
+  })
+})
+
+test("with no CLI anywhere, the desktop app's own engine runs the helper", async ($, on) => {
+  const engine = '/home/me/Library/Application Support/Claude/claude-code/2.1.317'
+  const seen = world(on, {
+    helperOut: reply('Checked.'), env: { PATH: '/usr/bin:/bin' },
+    files: [`${engine}/91184d3d9ba3/claude.app/Contents/MacOS/claude`], dirs: { [engine]: ['91184d3d9ba3'] },
+  })
+  await eachSurface($, seen, async () => {
+    await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect(seen.spawned[0].argv[0]).toBe(`${engine}/91184d3d9ba3/claude.app/Contents/MacOS/claude`)
+  })
+})
+
+test('with no claude at all, /better fails loudly with the fix and starts nothing', async ($, on) => {
+  const seen = world(on, { env: { PATH: '/usr/bin:/bin' }, files: [] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned).toHaveLength(0)
+    expect(seen.toasts.some((t) => t.includes("Couldn't find the `claude` CLI") && t.includes('which claude'))).toBe(true)
+  })
 })
 
 test('inside the helper, the guard refuses writes and allows reads', async ($, on) => {
   world(on, { env: { CLAUDE_BETTER_HELPER: '1' } })
-  await start($)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const edit = await $.tool.check({ tool: 'Edit', input: { file_path: 'a', old_string: 'x', new_string: 'y' } } as any)
   expect(edit.decision).toBe('deny')
   const bashWrite = await $.tool.check({ tool: 'Bash', input: { command: 'touch zz' } } as any)

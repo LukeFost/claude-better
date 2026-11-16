@@ -3,8 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
-  BRIEF_MARK, HELPER_ENV, HELPER_TIMEOUT_MS, StreamReader, buildBriefTask, buildHelperTask, clock, handOverText,
-  helperArgv, helperExitError, helperVerdict, parseMarkedPrompt, stageOf,
+  BRIEF_MARK, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, parseMarkedPrompt, stageOf,
 } from './better'
 
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
@@ -21,6 +21,20 @@ type Outcome =
 
 type HelperRequest = { kind: 'better' | 'brief'; input: string; task: string; cwd?: string; signal: AbortSignal; onProgress?: (r: StreamReader) => void }
 
+// The helper's `claude`, as an absolute path: the first on PATH, else a usual install spot, else the engine the
+// desktop app runs this session on. A Dock-launched app may not have the shell's PATH.
+async function findClaude($: EngineInterface, home: string): Promise<string | undefined> {
+  for (const path of claudeCandidates((await $.env.get('PATH')) ?? '', home)) {
+    if (await $.fs.exists(path).catch(() => false)) return path
+  }
+  const dir = desktopEngineDir(home, (await $.session.version()).version)
+  for (const build of await $.fs.list(dir).catch(() => [])) {
+    const path = `${dir}/${build.name}/claude.app/Contents/MacOS/claude`
+    if (build.kind === 'dir' && (await $.fs.exists(path).catch(() => false))) return path
+  }
+  return undefined
+}
+
 // Runs one helper: a headless, read-only `claude -p` on a never-saved fork of this session. Every run leaves a
 // record in ~/.claude/better/runs, so a failure can be read afterwards (no environment or credentials in it).
 async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcome> {
@@ -31,7 +45,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const log = `${home}/.claude/better/runs/${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}-${req.kind}-${id}.json`
   const sessionId = (await $.session.turns()) > 0 ? await $.session.id() : undefined
   const model = await $.session.model()
-  const argv = helperArgv({ claude: 'claude', sessionId, model, pluginRoot: $.plugin.root })
+  const claude = await findClaude($, home)
+  const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: $.plugin.root })
   const reader = new StreamReader(cwd, home)
   const stop = new AbortController()
   const onAbort = () => stop.abort(req.signal.reason ?? 'cancelled')
@@ -49,6 +64,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   let cancelled = false
   let checked: string | undefined
   try {
+    if (!claude) throw new Error(NO_CLAUDE)
     const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1' }, input: req.task })
     for (;;) {
       const pending = child.next()
@@ -81,14 +97,14 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
       }
     }
   } catch (e) {
-    error = `Couldn't start claude for the helper: ${(e as Error).message}`
+    error = claude ? `Couldn't start ${claude} for the helper: ${(e as Error).message}` : NO_CLAUDE
   } finally {
     timer.cancel()
     req.signal.removeEventListener('abort', onAbort)
   }
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
-    kind: req.kind, input: req.input, cwd, sessionId, model, argv: argv.slice(1), durationMs, exit, cancelled,
+    kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled,
     error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map((t) => `${t.state} ${t.label}`),
     reply: reader.reply, checked,
   }
@@ -125,7 +141,8 @@ async function back($: EngineInterface, surface?: 'terminal' | 'desktop' | 'vsco
   const boom = await read($, boomA)
   if (!boom?.improved) return 'No /better-boomerang prompt is waiting.'
   const viewed = await $.ui.view({})
-  if (viewed.deny) return `Couldn't switch back to the main conversation: ${viewed.deny}`
+  // The desktop app has no main view to switch, so a fork it never showed leaves nothing to switch back from.
+  if (viewed.deny && boom.isViewed !== false) return `Couldn't switch back to the main conversation: ${viewed.deny}`
   await handOver($, boom.improved, surface)
   await update($, boomA, () => null)
   S.boomAgent = undefined
@@ -230,12 +247,18 @@ export const register: Register = (on) => {
     if (!prompt && (await $.session.turns()) === 0) return { text: '/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>' }
     if ((await read($, boomA))?.status === 'running') return { text: '/better-boomerang is already running; wait for it to finish.' }
     const spawned = await $.agent.spawn({ subagentType: 'fork', prompt: buildHelperTask(prompt), description: '/better-boomerang' })
-    if (!spawned.agentId) return { text: `/better-boomerang couldn't start its fork: ${'deny' in spawned && spawned.deny ? spawned.deny : 'no agent started'}` }
+    if (!spawned.agentId) {
+      const deny = 'deny' in spawned && spawned.deny ? spawned.deny : 'no agent started'
+      // Auto mode only starts an agent the model asked for, so a command's fork is refused there.
+      if (/auto mode/i.test(deny)) return { text: "/better-boomerang can't start its fork in auto mode, which only starts an agent the model asks for. Switch to another permission mode (the mode menu under the input box in the desktop app, shift+tab in the terminal) and run it again, or use /better, which needs no fork." }
+      return { text: `/better-boomerang couldn't start its fork: ${deny}` }
+    }
     S.boomAgent = spawned.agentId
     await update($, boomA, () => ({ agentId: spawned.agentId!, startedAt: Date.now(), status: 'running' }))
     startTicker($)
     const viewed = await $.ui.view({ agentId: spawned.agentId })
-    const how = viewed.deny ? `Open it from the tasks list to watch (${viewed.deny}).` : 'You are watching it now.'
+    if (viewed.deny) await update($, boomA, (v) => (v ? { ...v, isViewed: false } : v))
+    const how = viewed.deny ? `It runs in the background; its row in this chat shows when it's done (${viewed.deny}).` : 'You are watching it now.'
     return { text: `/better-boomerang is researching in a read-only fork of this chat. ${how} When it's done, press "Back with prompt" above the prompt (or /better-back).`, isTextDisplayOnly: true }
   })
 

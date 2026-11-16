@@ -31,7 +31,7 @@ claude plugin marketplace add LukeFost/claude-better
 claude plugin install better@claude-better
 ```
 
-Start a new Claude Code session, then type `/better <your prompt>`.
+Start a new Claude Code session, in the terminal or in the Claude desktop app's Code tab, then type `/better <your prompt>`. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.
 
 ## Use
 
@@ -39,8 +39,8 @@ Start a new Claude Code session, then type `/better <your prompt>`.
 |---|---|
 | Deepen a prompt | `/better <prompt>` |
 | Deepen the task in progress, including your feedback so far | `/better` |
-| Stop it | `/better-cancel`, or press `cancel` in the band above the prompt (ctrl+x tab, then Enter) |
-| Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back` |
+| Stop it | `/better-cancel`, or press `cancel` in the band above the prompt (click it in the desktop app; in the terminal, ctrl+x tab, then Enter) |
+| Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back`. Not in auto mode. The desktop app can't show the fork in the main view, so there it runs in the background and its row in the chat says when it's done. |
 | An agent checks a brief before a new thread or subagent | the `mcp__better__check_brief` tool, or an Agent prompt that starts with `/better ` |
 
 ## How it maps from Pi
@@ -57,18 +57,22 @@ Start a new Claude Code session, then type `/better <your prompt>`.
 ## Limits
 
 - **Esc does not cancel `/better`.** A mod can't take the first Esc from the prompt box. Use `/better-cancel` or the band's `cancel` button. Esc does cancel an agent's brief check, because it interrupts the turn that is waiting on it.
+- **`/better-boomerang` doesn't run in auto mode.** Auto mode only starts an agent the model asked for, so it refuses the fork, and the command says so. Switch the permission mode (the mode menu under the input box in the desktop app, shift+tab in the terminal), or use `/better`.
+- **In the desktop app the fork can't be watched in the main view.** The app has no main view to switch, so the fork runs in the background, and `Back with prompt` or `/better-back` puts its prompt in your input box without switching anything.
+- **On a desktop session's first message, the app may say "/better isn't a command here."** The app checks the command before the session has loaded the mod; the command still runs. Later messages don't show it.
+- **Desktop toasts stay until you close them or the next one replaces it.**
 - **While a turn is running, Claude Code queues `/better`**, and it starts when the turn ends. Once it is running you can keep working; it is never blocked.
 - **The return from boomerang is one press, not automatic.** `$.ui.view({})` only switches views in answer to your own input, so the mod can't jump back when the fork finishes. Pi rewinds the chat; here the chat was never changed. The fork's transcript stays in `/tasks`.
 - **In auto mode, a `/better`-marked Agent call is refused after the check**, because Claude Code won't run a prompt that changed after approval. The agent then resends the checked brief, which the classifier reviews, and the unchecked brief never runs. To avoid the round trip, call `check_brief` first.
 - **Each command leaves one line in the transcript** (`/better is reading ...`), which the model can read. Pi's custom entries leave none.
-- **The helper starts `claude` from PATH.** If it isn't on PATH, the check fails loudly and nothing starts.
+- **The helper runs the `claude` CLI.** It takes the first `claude` on PATH, then `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` (an app launched from the Dock may lack your shell's PATH), then the engine the desktop app itself runs. The run record names the one it used. If there is none, `/better` says how to install it and nothing starts.
 - The helper uses the chat's model. Its tool list differs from the chat's, so the prompt cache only partly carries over.
 
 ## Develop
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 14 tests
+claude plugin test .     # 19 tests; the flows run on the terminal and desktop surfaces
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
 ```
 

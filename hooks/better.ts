@@ -82,6 +82,24 @@ export const HELPER_ENV = 'CLAUDE_BETTER_HELPER'
 export const HELPER_TOOLS = ['Read', 'Grep', 'Glob', 'Bash'] as const
 export const HELPER_TIMEOUT_MS = 20 * 60 * 1000
 
+// Where the helper's `claude` may be, in order: each PATH entry (the one a shell would pick), then the usual install
+// spots, which a Dock-launched app may lack on PATH. The Claude desktop app's own engine comes after these.
+export function claudeCandidates(path: string, home: string): string[] {
+  const windows = path.includes(';')
+  const names = windows ? ['claude.exe', 'claude'] : ['claude']
+  const dirs = path.split(windows ? ';' : ':').filter(Boolean)
+  if (home) dirs.push(`${home}/.local/bin`, `${home}/.claude/local`)
+  dirs.push('/opt/homebrew/bin', '/usr/local/bin')
+  return [...new Set(dirs.flatMap((d) => names.map((n) => `${d.replace(/[\\/]$/, '')}/${n}`)))]
+}
+
+// The engine the desktop app runs, `claude-code/<version>/<build>/claude.app/Contents/MacOS/claude`.
+export const desktopEngineDir = (home: string, version: string) => `${home}/Library/Application Support/Claude/claude-code/${version}`
+
+export const NO_CLAUDE =
+  "Couldn't find the `claude` CLI for the helper: it isn't on PATH, in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin, or in the desktop app's own engine. " +
+  'Install it (https://code.claude.com/docs/en/setup) so `which claude` finds it in a login shell, then start a new session.'
+
 export function helperArgv(opts: { claude: string; sessionId?: string; model?: string; pluginRoot: string }): string[] {
   return [
     opts.claude, '-p',
