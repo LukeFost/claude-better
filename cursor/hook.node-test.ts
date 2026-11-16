@@ -1,4 +1,3 @@
-// Plain Node test (the plugin runner allows no node: imports): node --test 'cursor/*.node-test.ts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, realpathSync } from 'node:fs'
@@ -15,14 +14,14 @@ test("Cursor's stop button: a stop marker cancels runs in that workspace that be
   const t0 = 1_000_000
   assert.equal(stoppedSince(ws, t0, dir, t0), false)
   recordStop([ws], dir, t0 + 5_000)
-  assert.equal(stoppedSince(ws, t0, dir, t0 + 6_000), true) // a run started before the stop
-  assert.equal(stoppedSince(join(ws, 'src'), t0, dir, t0 + 6_000), true) // a folder inside the workspace
-  assert.equal(stoppedSince(ws, t0 + 7_000, dir, t0 + 8_000), false) // a run started after the stop
-  assert.equal(stoppedSince('/elsewhere', t0, dir, t0 + 6_000), false) // another workspace
-  recordStop([], dir, t0) // no roots: no marker
+  assert.equal(stoppedSince(ws, t0, dir, t0 + 6_000), true)
+  assert.equal(stoppedSince(join(ws, 'src'), t0, dir, t0 + 6_000), true)
+  assert.equal(stoppedSince(ws, t0 + 7_000, dir, t0 + 8_000), false)
+  assert.equal(stoppedSince('/elsewhere', t0, dir, t0 + 6_000), false)
+  recordStop([], dir, t0)
   recordStop(undefined, dir, t0)
   assert.equal(readdirSync(dir).length, 1)
-  assert.equal(stoppedSince(ws, t0, dir, t0 + 5_000 + 11 * 60_000), false) // old markers are dropped
+  assert.equal(stoppedSince(ws, t0, dir, t0 + 5_000 + 11 * 60_000), false)
   assert.equal(readdirSync(dir).length, 0)
 })
 
@@ -36,7 +35,7 @@ test('a subagent prompt marked "/better " is checked before the subagent starts;
   assert.deepEqual(call('Shell', '/better ls'), { pass: true })
   assert.deepEqual(call('Task', undefined), { pass: true })
   assert.ok('deny' in (call('Task', '/better ') as object))
-  assert.ok('deny' in (call('Task', '/better do it', ['/']) as object)) // never the filesystem root
+  assert.ok('deny' in (call('Task', '/better do it', ['/']) as object))
   assert.ok('deny' in (call('Task', '/better do it', []) as object))
 })
 
@@ -50,7 +49,7 @@ test('two copies of the hook share one helper run per call, and a dead holder is
   }
   const [a, b] = await Promise.all([runOnce('k', work, dir), runOnce('k', work, dir)])
   assert.deepEqual([a, b, runs], ['checked', 'checked', 1])
-  writeFileSync(join(dir, 'dead.lock'), '999999') // a holder that no longer runs
+  writeFileSync(join(dir, 'dead.lock'), '999999')
   assert.equal(await runOnce('dead', async () => 'mine', dir, 5_000), 'mine')
 })
 
@@ -66,7 +65,7 @@ test('a folder that holds the home folder is never a workspace: no brief check t
   assert.deepEqual(plan([ws]), { brief: 'do it', cwd: ws })
   assert.deepEqual(plan([top, ws]), { brief: 'do it', cwd: ws })
   assert.equal(isWorkspaceRoot('/', ''), false)
-  assert.equal(isWorkspaceRoot(ws, ''), true) // an empty HOME is not the current folder
+  assert.equal(isWorkspaceRoot(ws, ''), true)
   const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
   recordStop([top], dir, 1, home)
   recordStop([home], dir, 1, home)

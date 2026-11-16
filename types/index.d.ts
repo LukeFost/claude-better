@@ -13,7 +13,6 @@ export type BetterBoomerang = {
   startedAt: number
   status: 'running' | 'ready'
   improved?: string
-  /** false when the main view couldn't show the fork (the desktop app draws none), so Back has no view to leave */
   isViewed?: boolean
 }
 
@@ -24,7 +23,6 @@ declare module 'claude-code' {
       briefs: number
       boomerang: BetterBoomerang | null
       tick: number
-      /** every /better-boomerang fork started this session; each stays guarded for its whole life */
       forks: string[]
     }
   }

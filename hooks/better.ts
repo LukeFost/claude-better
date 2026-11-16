@@ -1,9 +1,5 @@
-// Ported from Nico Bailon's pi-better 0.2.0 (MIT, see LICENSE.pi-better): better.ts, helper.md and brief.md.
-// The prompts are pi-better's own words; only the session-log path names Claude Code's folder instead of Pi's.
-
 const OPEN = '<improved-prompt>'
 const CLOSE = '</improved-prompt>'
-// The opening tag counts only on a line of its own; the prompt itself may mention the tag inline.
 const OPEN_LINE = `\n${OPEN}\n`
 
 export const HELPER_MD = `First, without asking me anything, find and read the code, files, docs and logs this touches, so your answers rest on them. I want a deeper version of this task/plan request, not a bigger one. Before rewriting it: (1) say what a top professional in this field would do here that I'm not asking for; (2) name the rawest material they would start from instead of what has already been digested for me; (3) name the specific methods and tools they would use; (4) say what, other than you or me, would show the result is right. Then rewrite my prompt to ask for exactly that.
@@ -46,8 +42,6 @@ export function buildHelperTask(prompt: string): string {
   ].join('\n\n')
 }
 
-// A brief marked "/better" gets brief.md's check instead of Depth: an agent's brief is long and its scope is
-// decided, so what it lacks is what the subagent can't see, not depth.
 export const BRIEF_MARK = /^\/better(?=\s|$)/
 
 export function buildBriefTask(brief: string): string {
@@ -70,20 +64,14 @@ export function replyProgress(text: string): { answered: number; writingPrompt: 
   return { answered, writingPrompt: `\n${text}`.includes(OPEN_LINE) }
 }
 
-// pi-better puts the improved prompt above whatever the person typed meanwhile.
 export function handOverText(improved: string, draft: string): string {
   const kept = draft.trim()
   return kept ? `${improved}\n\n${kept}` : improved
 }
 
-// ---- The helper process: a headless `claude -p` on a fork of this session, which is never saved. ----
-
 export const HELPER_ENV = 'CLAUDE_BETTER_HELPER'
-// The helper's guard writes this file when it loads; a run without it is refused (see runHelper).
 export const GUARD_ENV = 'CLAUDE_BETTER_GUARD_FILE'
 export const HELPER_TOOLS = ['Read', 'Grep', 'Glob', 'Bash'] as const
-// The helper reads everything under its working folder, so a caller may only point it at the session's folder or
-// a folder inside it. Both paths are real paths (symlinks and `..` resolved) before they are compared.
 export function isInside(path: string, roots: readonly string[]): boolean {
   const norm = (p: string) => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
   const target = norm(path)
@@ -98,8 +86,6 @@ export const outsideFolder = (cwd: string, roots: readonly string[]) =>
 
 export const HELPER_TIMEOUT_MS = 20 * 60 * 1000
 
-// Where the helper's `claude` may be, in order: each PATH entry (the one a shell would pick), then the usual install
-// spots, which a Dock-launched app may lack on PATH. The Claude desktop app's own engine comes after these.
 export function claudeCandidates(path: string, home: string): string[] {
   const windows = path.includes(';')
   const names = windows ? ['claude.exe', 'claude'] : ['claude']
@@ -109,7 +95,6 @@ export function claudeCandidates(path: string, home: string): string[] {
   return [...new Set(dirs.flatMap((d) => names.map((n) => `${d.replace(/[\\/]$/, '')}/${n}`)))]
 }
 
-// The engine the desktop app runs, `claude-code/<version>/<build>/claude.app/Contents/MacOS/claude`.
 export const desktopEngineDir = (home: string, version: string) => `${home}/Library/Application Support/Claude/claude-code/${version}`
 
 export const NO_CLAUDE =
@@ -120,27 +105,17 @@ export function helperArgv(opts: { claude: string; sessionId?: string; model?: s
   return [
     opts.claude, '-p',
     '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    // The fork is a copy of this chat the helper reads; --no-session-persistence keeps it out of /resume.
     ...(opts.sessionId ? ['--resume', opts.sessionId, '--fork-session'] : []),
     '--no-session-persistence',
-    // Nothing prompts in the background: whatever would ask is refused, and this mod's guard (loaded with
-    // --plugin-dir, switched on by HELPER_ENV) refuses every call that is not a read.
     '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-    // No settings files: no allow rules from the user or the repo can widen dontAsk, so even a helper whose guard
-    // failed to load can only read inside the working folder.
     '--setting-sources', '',
     '--strict-mcp-config',
     ...(opts.model ? ['--model', opts.model] : []),
     '--plugin-dir', opts.pluginRoot,
-    // --tools is variadic, so it goes last and the task goes on stdin.
     '--tools', HELPER_TOOLS.join(','),
   ]
 }
 
-// The helper's guard. Read, Grep and Glob are reads; Bash only where Claude Code's own read-only check holds the
-// command read-only (`ls`, `cat`, `grep`, `git log`), which is stricter than pi-better's prompt-only rule.
-// A read is never allowed outright: it passes on to Claude Code, whose dontAsk scope (the working folder), deny
-// rules and other hooks still decide it. The guard only ever narrows.
 export function helperVerdict(tool: string, isReadOnly: boolean | undefined): { decision: 'pass' } | { decision: 'deny'; reason: string } {
   if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return { decision: 'pass' }
   if (tool === 'Bash' && isReadOnly) return { decision: 'pass' }
@@ -187,7 +162,6 @@ export function staleRecords(names: readonly string[], keep = KEEP_RUNS): string
   return records.slice(0, Math.max(0, records.length - keep))
 }
 
-// Reads `claude -p --output-format stream-json` line by line, as pi-better reads `pi --mode json`.
 export class StreamReader {
   tools: ToolRow[] = []
   text = ''
@@ -195,7 +169,6 @@ export class StreamReader {
   resultError: string | undefined
   sawResult = false
   private buffered = ''
-  // Plain fields, not parameter properties, so Node can run this file by stripping types (the Cursor skill does).
   private cwd: string
   private home: string
   constructor(cwd: string, home: string) {
@@ -222,7 +195,7 @@ export class StreamReader {
     try {
       ev = JSON.parse(line)
     } catch {
-      return false // a hook in the helper may print plain text
+      return false
     }
     if (ev.type === 'stream_event') {
       const inner = ev.event
@@ -257,7 +230,6 @@ export class StreamReader {
     if (ev.type === 'result') {
       this.sawResult = true
       if (typeof ev.result === 'string' && ev.result.trim()) this.reply = ev.result
-      // -p exits 0 on some failed model calls, so the failure is read from the result.
       if (ev.is_error || (ev.subtype && ev.subtype !== 'success')) this.resultError = typeof ev.result === 'string' && ev.result ? ev.result : ev.subtype ?? 'error'
       return true
     }
@@ -265,13 +237,10 @@ export class StreamReader {
   }
 }
 
-// stderr stays in the run record (mode 0600): it can hold anything the helper printed, so it never goes into a
-// message an agent or a toast shows.
 export function helperExitError(code: number | null, signal: string | null): string {
   return `The helper ${code === null ? `was stopped by ${signal}` : `exited with code ${code}`}`
 }
 
-// One per question, in helper.md's order.
 const ANSWERING = ['Working out what a pro would do', 'Finding the rawest material', 'Picking the methods and tools', 'Deciding what would prove it right']
 
 export function stageOf(text: string, questions = 4): { stage: number; label: string } {

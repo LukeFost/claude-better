@@ -1,8 +1,3 @@
-// The /better MCP server for Cursor (stdio, newline-delimited JSON-RPC). Two tools:
-//   better       deepen a prompt; the Cursor app offers the result in a "Create chat with prompt" dialog (its prompt link), and it goes to the clipboard
-//   check_brief  check a subagent brief; returns it to use verbatim
-// Progress shows on the tool card (notifications/progress). Cursor's stop button cancels the helper through the
-// plugin's stop hook (cursor/stops.ts), since Cursor sends the server no notifications/cancelled.
 import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
@@ -57,8 +52,6 @@ const send = (msg: unknown) => process.stdout.write(`${JSON.stringify(msg)}\n`)
 const calls = new Map<string | number, AbortController>()
 let supportsRoots = false
 
-// The workspace: the client's roots (MCP roots/list), else this server's own folder. Never `/`, the home folder or a folder above it,
-// since the helper reads everything under the folder it runs in.
 let clientRoots: string[] | undefined
 let rootsPending: ((roots: string[]) => void) | undefined
 const real = (p: string) => {
@@ -83,7 +76,6 @@ function askRoots(): Promise<void> {
     send({ jsonrpc: '2.0', id: 'better-roots', method: 'roots/list' })
   })
 }
-// The folder the helper may run in, or why not.
 function helperCwd(asked: unknown): { cwd: string } | { error: string } {
   const roots = workspace()
   if (!roots.length) return { error: "this window has no workspace folder (or it is /, your home folder or a folder above it), so there's nothing the helper may read. Open a project folder first." }
@@ -93,8 +85,6 @@ function helperCwd(asked: unknown): { cwd: string } | { error: string } {
   return isInside(target, roots) ? { cwd: target } : { error: outsideFolder(asked, roots) }
 }
 
-// The Cursor app sets these for the processes it starts; cursor-agent in a terminal does not, and a prompt link
-// would pull the app forward there, so it gets the clipboard only.
 const isCursorApp = () => Boolean(process.env.VSCODE_PID || process.env.VSCODE_IPC_HOOK || process.env.CURSOR_TRACE_ID)
 
 function toClipboard(text: string): boolean {
@@ -102,13 +92,11 @@ function toClipboard(text: string): boolean {
   return spawnSync('pbcopy', { input: text }).status === 0
 }
 
-// Opens Cursor's prompt link, or says why not. Cursor shows no dialog for text its own rule refuses, so that text never goes to the link.
 function openInNewChat(text: string): { opened: true } | { opened: false; why?: string } {
   if (process.platform !== 'darwin' || !isCursorApp()) return { opened: false }
   const why = linkRefusal(text)
   if (why) return { opened: false, why }
   const url = `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(text)}`
-  // -g: hand the link to Cursor without bringing it forward, so a user who switched apps mid-run keeps their focus.
   spawn('open', ['-g', url], { stdio: 'ignore', detached: true }).unref()
   return { opened: true }
 }
@@ -116,7 +104,6 @@ function openInNewChat(text: string): { opened: true } | { opened: false; why?: 
 async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
   const isBrief = name === 'check_brief'
   const body = String((isBrief ? args?.brief : args?.prompt) ?? '').replace(/^\/better(\s|$)/, '').trim()
-  // The app starts one server before any workspace is open, so the roots are asked for again at each call.
   if (supportsRoots) await askRoots()
   const where = helperCwd(args?.cwd)
   if ('error' in where) return { isError: true, content: [{ type: 'text', text: `/better refused: ${where.error}${isBrief ? ' Do not start the subagent with the unchecked brief.' : ''}` }] }
@@ -125,7 +112,6 @@ async function call(id: string | number, name: string, args: any, progressToken:
   const context = typeof args?.context === 'string' && args.context.trim() ? `\n\n## What this chat established\n\n${args.context.trim()}` : ''
   const stop = new AbortController()
   calls.set(id, stop)
-  // Cursor's stop button reaches only the plugin's stop hook, which leaves a marker for this workspace.
   const since = Date.now()
   const watch = setInterval(() => stoppedSince(cwd, since) && stop.abort(), 500)
   try {
@@ -140,7 +126,6 @@ async function call(id: string | number, name: string, args: any, progressToken:
       return { isError: true, content: [{ type: 'text', text: isBrief ? `${text} Do not start the subagent with the unchecked brief.` : text }] }
     }
     if (isBrief) return { content: [{ type: 'text', text: out.text }] }
-    // Stopped after the helper's last word but before the hand-off: drop the result rather than pop a dialog.
     if (stop.signal.aborted || stoppedSince(cwd, since)) return { isError: true, content: [{ type: 'text', text: '/better was cancelled; nothing was produced.' }] }
     const link = openInNewChat(out.text)
     const copied = !link.opened && toClipboard(out.text)
@@ -165,7 +150,6 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
   const { id, method, params } = msg
   if (id === 'better-roots' && method === undefined) {
     const roots = Array.isArray(msg.result?.roots) ? msg.result.roots : []
-    // Cursor 3.30 sends a plain path where the spec says a file:// URI; take both.
     rootsPending?.(roots.flatMap((r: any) => {
       const uri = r?.uri
       if (typeof uri !== 'string') return []

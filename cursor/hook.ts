@@ -1,7 +1,3 @@
-// Cursor hooks for /better (cursor/hooks.json). Reads the hook's JSON on stdin and prints its answer on stdout.
-//   stop        a turn the user aborted leaves a marker, so a /better run in that workspace is cancelled (cursor/stops.ts)
-//   preToolUse  a subagent (Task) prompt that starts with "/better " is checked by the helper and replaced by the
-//               checked brief, as the Claude Code mod does; if the check fails the subagent doesn't start
 import { realpathSync } from 'node:fs'
 import { runHelper } from './helper.ts'
 import { isWorkspaceRoot, recordStop, runOnce, stoppedSince } from './stops.ts'
@@ -11,7 +7,6 @@ const MARK = /^\/better(\s|$)/
 
 type Plan = { pass: true } | { deny: string } | { brief: string; cwd: string }
 
-/** What preToolUse should do with this tool call, before any helper runs. */
 export function planBrief(input: any, home = process.env.HOME ?? ''): Plan {
   const tool = String(input?.tool_name ?? '')
   const prompt = input?.tool_input?.prompt
@@ -46,10 +41,8 @@ async function main() {
     if ('pass' in plan) return say({})
     const deny = (why: string) => ({ permission: 'deny', user_message: why, agent_message: `${why} Do not start the subagent with the unchecked brief.` })
     if ('deny' in plan) return say(deny(`/better: ${plan.deny}`))
-    // One key per tool call: both copies of the hook see the same tool_use_id, and a retry gets a new one.
     const key = createHash('sha256').update(JSON.stringify([input.conversation_id, input.generation_id, input.tool_use_id, input.tool_input.prompt])).digest('hex').slice(0, 32)
     const answer = await runOnce(key, async () => {
-      // Cursor's stop button reaches only the stop hook, so watch for its marker here too.
       const stop = new AbortController()
       const since = Date.now()
       const watch = setInterval(() => stoppedSince(plan.cwd, since) && stop.abort(), 500)
@@ -65,6 +58,5 @@ async function main() {
 
 if (process.argv[1]?.endsWith('/hook.ts'))
   main().catch((e) => {
-    // A crash must not let an unchecked brief through; hooks.json also sets failClosed on preToolUse.
     process.stdout.write(JSON.stringify({ permission: 'deny', user_message: `/better's hook failed, so the subagent didn't start: ${(e as Error).message}` }))
   })

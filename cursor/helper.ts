@@ -1,6 +1,3 @@
-// The /better helper for Cursor: the same read-only `claude -p` as the Claude Code mod, with the mod's guard loaded
-// into it (fail closed: a run whose guard never wrote its proof is refused). Every run leaves a record (mode 0600)
-// in ~/.claude/better/runs with "from": "cursor".
 import { spawn } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -13,7 +10,6 @@ import {
 export type Kind = 'better' | 'brief'
 export type Outcome = { ok: true; text: string; log: string } | { ok: false; cancelled: boolean; error: string; log: string }
 
-// The Claude Code plugin whose guard the helper loads: this file's folder's parent, symlinks resolved.
 export const PLUGIN_ROOT = resolve(dirname(realpathSync(new URL(import.meta.url).pathname)), '..')
 
 export function pruneRuns(dir: string, keep = KEEP_RUNS - 1): void {

@@ -1,7 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-// Every flow runs on both surfaces. The desktop app draws no main view, so `ui.view` refuses there, as the
-// real app does ("no main view here").
 const SURFACES = ['terminal', 'desktop'] as const
 type Surface = (typeof SURFACES)[number]
 
@@ -22,8 +20,6 @@ type Opts = {
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
 }
 
-// Stands for the engine beneath the plugin. `seen` records what the plugin asked of it; `at.surface` is the
-// surface the current pass draws on.
 function world(on: any, opts: Opts) {
   const clock = mock.clock(on)
   const at = { surface: 'terminal' as Surface }
@@ -42,7 +38,6 @@ function world(on: any, opts: Opts) {
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.root', () => ({ value: '/repo' }))
-  // Real paths: `..` folded, and `links` (a path to where it lands) followed.
   on('fs.stat', (_: any, e: any) => {
     const parts: string[] = []
     for (const p of e.path.split('/')) if (p === '..') parts.pop(); else if (p && p !== '.') parts.push(p)
@@ -66,19 +61,15 @@ function world(on: any, opts: Opts) {
     if (!written.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
     return { value: written.get(e.path) }
   })
-  // Claude Code's own verdict beneath the plugin's guard.
   on('tool.check', () => ({ decision: 'allow', reason: 'core decides' }))
   on('prompt.read', () => ({ value: { text: opts.draft ?? '', cursor: 0 } }))
   on('prompt.fill', (_: any, e: any) => (seen.filled.push(e.text), { isFilled: true }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
   on('ui.view', (_: any, e: any) => (seen.views.push(e), { value: at.surface === 'terminal' ? {} : { deny: 'no main view here' } }))
-  // The kit can refuse a spawn but not start one: only the real engine sets a started agent's id, so the
-  // boomerang's started path is shown by the recordings in evidence/, not here.
   if (opts.spawnDeny) on('agent.spawn', () => ({ deny: opts.spawnDeny }))
   on('tool.call', { tool: 'Agent' }, (_: any, e: any) => (seen.agentRan.push(e.prompt), { result: 'subagent done' }))
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
-    // A helper whose guard loaded writes the proof the parent checks.
     if (!opts.isGuardless) written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
     if (opts.hang) {
       await new Promise(() => {})
@@ -90,7 +81,6 @@ function world(on: any, opts: Opts) {
   return seen
 }
 
-// One pass per surface, each from a fresh start of the session on that surface.
 async function eachSurface($: any, seen: ReturnType<typeof world>, run: (surface: Surface) => Promise<void>) {
   for (const surface of SURFACES) {
     seen.at.surface = surface
@@ -120,7 +110,6 @@ test('a failed brief check launches no subagent and keeps a run log', async ($, 
     const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
     expect(seen.agentRan).toEqual([])
     expect(JSON.stringify(r)).toContain("didn't start")
-    // stderr stays in the run record; the agent gets the log path, never the text.
     expect(JSON.stringify(r)).not.toContain('model unavailable')
     expect(JSON.stringify(r)).toContain('/home/me/.claude/better/runs/')
     expect(seen.writes.some((p) => p.startsWith('/home/me/.claude/better/runs/'))).toBe(true)
@@ -241,7 +230,6 @@ test('inside the helper, the guard writes its proof, refuses writes and leaves r
   expect(edit.decision).toBe('deny')
   const bashWrite = await $.tool.check({ tool: 'Bash', input: { command: 'touch zz' } } as any)
   expect(bashWrite.decision).toBe('deny')
-  // A read is never allowed by the guard: it reaches Claude Code's own check (the stand-in beneath it).
   const read = await $.tool.check({ tool: 'Read', input: { file_path: '/home/me/.ssh/id_ed25519' } } as any)
   expect(read.reason).toBe('core decides')
 })

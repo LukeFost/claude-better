@@ -1,7 +1,3 @@
-// Cursor's own rule for its prompt link (cursor://anysphere.cursor-deeplink/prompt?text=), copied from
-// Cursor 3.30.14 (workbench.glass.main.js: Cju, AC3, TC3, CC3). When it refuses, Cursor opens no dialog,
-// so /better must not open the link or claim one is showing; the text goes to the clipboard only.
-
 const LIMIT = 10_000
 const ALLOWED = /^(?!.*(?:\p{Cf}|\u007F))[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Z}\r\n\t !-~]+$/u
 const RISKY = [
@@ -27,9 +23,6 @@ function base64Words(text: string): string {
   const found: string[] = []
   for (const word of text.split(/\s+/)) {
     if (!/^[A-Za-z0-9+/=]+$/.test(word) || word.length % 4 !== 0) continue
-    // Cursor may decode with Buffer, which reads up to the first '=' where atob throws; try both, so a word either
-    // decoder flags is caught (at worst a prompt goes to the clipboard only).
-    // Buffer also drops a dangling character (a head one longer than a multiple of 4).
     let head = word.split('=')[0]!
     if (head.length % 4 === 1) head = head.slice(0, -1)
     for (const form of new Set([word, head + '='.repeat((4 - (head.length % 4)) % 4)])) {
@@ -54,7 +47,6 @@ function looksRisky(text: string): boolean {
   return forms.some((f) => /\.env(\b|\W)/.test(f) || RISKY.some((r) => r.test(f)))
 }
 
-/** Why Cursor's prompt link would refuse this text, or undefined if it would show the dialog. */
 export function linkRefusal(text: string): string | undefined {
   if (!text.trim()) return 'it is empty'
   if (!ALLOWED.test(text)) return 'it has characters the link does not allow'

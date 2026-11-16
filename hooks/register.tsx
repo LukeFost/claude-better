@@ -10,7 +10,6 @@ import {
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
 const briefsA = atom({ plugin: 'better', key: 'briefs' } as const, 0)
 const boomA = atom({ plugin: 'better', key: 'boomerang' } as const, null as BetterBoomerang | null)
-// Every /better-boomerang fork started, kept in an atom too so a module reload doesn't unguard a fork still running.
 const forksA = atom({ plugin: 'better', key: 'forks' } as const, [] as string[])
 const tickA = atom({ plugin: 'better', key: 'tick' } as const, 0)
 
@@ -23,8 +22,6 @@ type Outcome =
 
 type HelperRequest = { kind: 'better' | 'brief'; input: string; task: string; cwd?: string; signal: AbortSignal; onProgress?: (r: StreamReader) => void }
 
-// The helper's `claude`, as an absolute path: the first on PATH, else a usual install spot, else the engine the
-// desktop app runs this session on. A Dock-launched app may not have the shell's PATH.
 async function findClaude($: EngineInterface, home: string): Promise<string | undefined> {
   for (const path of claudeCandidates((await $.env.get('PATH')) ?? '', home)) {
     if (await $.fs.exists(path).catch(() => false)) return path
@@ -37,8 +34,6 @@ async function findClaude($: EngineInterface, home: string): Promise<string | un
   return undefined
 }
 
-// Runs one helper: a headless, read-only `claude -p` on a never-saved fork of this session. Every run leaves a
-// record in ~/.claude/better/runs, so a failure can be read afterwards (no environment or credentials in it).
 async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcome> {
   const home = (await $.env.get('HOME')) ?? ''
   const cwd = req.cwd ?? (await $.session.cwd())
@@ -67,14 +62,12 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   let checked: string | undefined
   try {
     if (!claude) throw new Error(NO_CLAUDE)
-    // The helper's guard writes the run record's first version when it loads (see session.start).
     const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input: req.task })
     for (;;) {
       const pending = child.next()
       pending.catch(() => {})
       const step = await Promise.race([pending, stopped])
       if (step === 'stopped') {
-        // Leaving the stream kills the child.
         void child.return(undefined as never).catch(() => {})
         break
       }
@@ -105,7 +98,6 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     timer.cancel()
     req.signal.removeEventListener('abort', onAbort)
   }
-  // Fail closed: a helper whose guard never loaded ran unguarded, so its result is not used.
   const isGuarded = await $.fs.read(log).then((t) => JSON.parse(t)?.isGuardLoaded === true).catch(() => false)
   if (exit && !isGuarded && !error) {
     checked = undefined
@@ -122,7 +114,6 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   return checked !== undefined && !error ? { ok: true, checked, log } : { ok: false, cancelled, error: error ?? 'unknown failure', log }
 }
 
-// Keeps the newest KEEP_RUNS records. $.fs has no delete, so the stale ones go to rm by exact name.
 async function pruneRuns($: EngineInterface, dir: string): Promise<string | undefined> {
   try {
     const stale = staleRecords((await $.fs.list(dir)).filter((e) => e.kind === 'file').map((e) => e.name), KEEP_RUNS)
@@ -137,7 +128,6 @@ async function pruneRuns($: EngineInterface, dir: string): Promise<string | unde
   }
 }
 
-// The improved prompt goes in the box above anything typed meanwhile; nothing is sent.
 async function handOver($: EngineInterface, improved: string, surface?: 'terminal' | 'desktop' | 'vscode' | 'mobile'): Promise<void> {
   const box = await $.prompt.read()
   const filled = await $.prompt.fill({ text: handOverText(improved, box.text), mode: 'replace' })
@@ -149,8 +139,6 @@ async function handOver($: EngineInterface, improved: string, surface?: 'termina
   $.ui.toast(`The input box couldn't take the prompt (${filled.refusal ?? 'refused'}); ${copied.isCopied ? 'it is on your clipboard' : 'see the run log in ~/.claude/better/runs'}. Nothing was sent.`, { timeoutMs: 12000 })
 }
 
-// Module state: a reload starts it over, and the reload kills any helper child with the old module.
-// forks: every /better-boomerang fork this module started. A fork stays guarded for its whole life, after Back too.
 const S: { isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string> } = { isHelper: false, forks: new Set() }
 
 function startTicker($: EngineInterface): void {
@@ -167,15 +155,12 @@ async function back($: EngineInterface, surface?: 'terminal' | 'desktop' | 'vsco
   const boom = await read($, boomA)
   if (!boom?.improved) return 'No /better-boomerang prompt is waiting.'
   const viewed = await $.ui.view({})
-  // The desktop app has no main view to switch, so a fork it never showed leaves nothing to switch back from.
   if (viewed.deny && boom.isViewed !== false) return `Couldn't switch back to the main conversation: ${viewed.deny}`
   await handOver($, boom.improved, surface)
   await update($, boomA, () => null)
   return undefined
 }
 
-// The folder check_brief may point the helper at: the session's own (its cwd or project root) or one inside it,
-// compared as real paths. Anything else is refused, since the helper reads everything under its cwd.
 async function briefCwd($: EngineInterface, asked: string | undefined): Promise<{ cwd?: string } | { deny: string }> {
   if (asked === undefined || !asked.trim()) return {}
   const base = await $.session.cwd()
@@ -202,7 +187,6 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     S.isHelper = (await $.env.get('CLAUDE_BETTER_HELPER')) === '1'
     if (S.isHelper) {
-      // The proof the parent waits for: written before the helper's first turn, so it means tool.check is in place.
       const proof = await $.env.get('CLAUDE_BETTER_GUARD_FILE')
       if (proof) await $.fs.write(proof, JSON.stringify({ isGuardLoaded: true }))
       return next(e)
@@ -234,18 +218,15 @@ export const register: Register = (on) => {
     return started
   })
 
-  // The helper's own guard (inside the helper process), and the boomerang fork's (in this one).
   on('tool.check', async ($, e, next) => {
     if (!S.isHelper && !(e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA)) ?? []).includes(e.agentId)))) return next(e)
     const verdict = helperVerdict(e.tool, e.isReadOnly)
-    // A read goes on to Claude Code's own checks (dontAsk's folder scope, deny rules, other hooks); never allowed here.
     return verdict.decision === 'pass' ? next(e) : { decision: 'deny', reason: verdict.reason }
   }).catch(async ($, e, next) => {
     const isFork = e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA).catch(() => [] as string[])) ?? []).includes(e.agentId))
     return S.isHelper || isFork ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)
   })
 
-  // ---- /better ----
   on('command.run', { command: 'better' }, async ($, e) => {
     if (S.isHelper) return { text: '/better is off inside its own helper.' }
     const prompt = e.args.trim()
@@ -286,7 +267,6 @@ export const register: Register = (on) => {
     return { text: '/better cancelled; nothing was sent.', isTextDisplayOnly: true }
   })
 
-  // ---- /better-boomerang: a fork of this chat in the main view, then back with the prompt ----
   on('command.run', { command: 'better-boomerang' }, async ($, e) => {
     if (S.isHelper) return { text: '/better-boomerang is off inside its own helper.' }
     const prompt = e.args.trim()
@@ -295,7 +275,6 @@ export const register: Register = (on) => {
     const spawned = await $.agent.spawn({ subagentType: 'fork', prompt: buildHelperTask(prompt), description: '/better-boomerang' })
     if (!spawned.agentId) {
       const deny = 'deny' in spawned && spawned.deny ? spawned.deny : 'no agent started'
-      // Auto mode only starts an agent the model asked for, so a command's fork is refused there.
       if (/auto mode/i.test(deny)) return { text: "/better-boomerang can't start its fork in auto mode, which only starts an agent the model asks for. Switch to another permission mode (the mode menu under the input box in the desktop app, shift+tab in the terminal) and run it again, or use /better, which needs no fork." }
       return { text: `/better-boomerang couldn't start its fork: ${deny}` }
     }
@@ -329,7 +308,6 @@ export const register: Register = (on) => {
     return { text: said ?? 'Back in the main conversation; the improved prompt is in your input box.', isTextDisplayOnly: true }
   })
 
-  // ---- Agent use: the callable tool, and "/better" at the start of an Agent prompt ----
   on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
     const input = e as unknown as { brief?: unknown; cwd?: unknown }
     if (typeof input.brief !== 'string' || !input.brief.trim()) return { deny: 'check_brief needs the brief.' }
@@ -349,7 +327,6 @@ export const register: Register = (on) => {
     return next({ ...e, prompt: out.checked })
   }).catch(($, e, next) => (next.called ? next(e) : typeof e.prompt === 'string' && BRIEF_MARK.test(e.prompt) ? { deny: "/better's brief check failed, so the subagent didn't start." } : next(e)))
 
-  // ---- The band above the prompt ----
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (S.isHelper) return next(e)
     const run = await read($, runA)

@@ -7,7 +7,6 @@ import {
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
   expect(parseMarkedPrompt('(1) a\n(4) b\n<improved-prompt>\nDo X with Y.\n</improved-prompt>')).toBe('Do X with Y.')
-  // The tag mentioned inline is not the block.
   expect(parseMarkedPrompt('see <improved-prompt> inline\n<improved-prompt>\nreal\n</improved-prompt>')).toBe('real')
   expect(() => parseMarkedPrompt('no block here')).toThrow(/no <improved-prompt>/)
   expect(() => parseMarkedPrompt('<improved-prompt>\n\n</improved-prompt>')).toThrow(/empty/)
@@ -34,10 +33,8 @@ test('the helper is a never-saved fork with read tools, and the task never rides
   expect(argv[argv.indexOf('--resume') + 1]).toBe('abc')
   expect(argv).toContain('--no-session-persistence')
   expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('dontAsk')
-  // No settings files, so no allow rule (the user's or the repo's) widens dontAsk if the guard is missing.
   expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('')
   expect(argv[argv.indexOf('--plugin-dir') + 1]).toBe('/mods/better')
-  // --tools is variadic: last, so nothing after it is swallowed.
   expect(argv.slice(-2)).toEqual(['--tools', 'Read,Grep,Glob,Bash'])
   expect(helperArgv({ claude: 'claude', pluginRoot: '/m' })).not.toContain('--resume')
 })
@@ -63,7 +60,6 @@ test('the stream reader follows tools, the reply and the stage', () => {
     { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '(1) pro\n(2) raw\n' } } },
   ]
   const text = lines.map((l) => JSON.stringify(l)).join('\n') + '\n'
-  // Split mid-line, as a pipe delivers it.
   r.push(text.slice(0, 50))
   r.push(text.slice(50))
   expect(r.tools.map((t) => `${t.state} ${t.label}`)).toEqual(['ok cat README.md (+1 more)', 'failed Read ~/x.md'])
