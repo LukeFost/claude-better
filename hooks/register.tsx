@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
-  BRIEF_MARK, GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  BRIEF_MARK, GUARD_ENV, HELPER_ENV, isInside, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
   desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, parseMarkedPrompt, stageOf,
 } from './better'
 
@@ -156,6 +156,19 @@ async function back($: EngineInterface, surface?: 'terminal' | 'desktop' | 'vsco
   return undefined
 }
 
+// The folder check_brief may point the helper at: the session's own (its cwd or project root) or one inside it,
+// compared as real paths. Anything else is refused, since the helper reads everything under its cwd.
+async function briefCwd($: EngineInterface, asked: string | undefined): Promise<{ cwd?: string } | { deny: string }> {
+  if (asked === undefined || !asked.trim()) return {}
+  const base = await $.session.cwd()
+  const real = async (p: string) => (await $.fs.stat(p, { resolve: true }).catch(() => undefined))?.realPath
+  const roots = [...new Set((await Promise.all([base, await $.session.root()].map(real))).filter((r): r is string => !!r))]
+  const abs = asked.startsWith('/') || /^[A-Za-z]:[\\/]/.test(asked) ? asked : `${base}/${asked}`
+  const target = await real(abs)
+  if (!target) return { deny: `cwd ${asked} doesn't exist, so the brief is unchecked; do not start the work with it.` }
+  return isInside(target, roots) ? { cwd: target } : { deny: `${outsideFolder(asked, roots)} Do not start the work with the unchecked brief.` }
+}
+
 async function checkBrief($: EngineInterface, brief: string, cwd: string | undefined, signal: AbortSignal): Promise<Outcome> {
   await update($, briefsA, (n) => (n ?? 0) + 1)
   startTicker($)
@@ -194,7 +207,7 @@ export const register: Register = (on) => {
         type: 'object',
         properties: {
           brief: { type: 'string', description: 'The brief as you would send it.' },
-          cwd: { type: 'string', description: 'Where the receiver will work, if not this session\'s folder.' },
+          cwd: { type: 'string', description: 'Where the receiver will work, if not this session\'s folder: a folder inside it. Anything outside it is refused.' },
         },
         required: ['brief'],
         additionalProperties: false,
@@ -298,7 +311,9 @@ export const register: Register = (on) => {
   on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
     const input = e as unknown as { brief?: unknown; cwd?: unknown }
     if (typeof input.brief !== 'string' || !input.brief.trim()) return { deny: 'check_brief needs the brief.' }
-    const out = await checkBrief($, input.brief.trim(), typeof input.cwd === 'string' ? input.cwd : undefined, next.signal)
+    const where = await briefCwd($, typeof input.cwd === 'string' ? input.cwd : undefined)
+    if ('deny' in where) return { deny: where.deny }
+    const out = await checkBrief($, input.brief.trim(), where.cwd, next.signal)
     if (out.ok) return { result: out.checked }
     return { deny: out.cancelled ? '/better was cancelled, so the brief is unchecked; do not start the work with it.' : `/better couldn't check this brief, so do not start the work with it: ${out.error} (run log: ${out.log})` }
   }).catch(() => ({ deny: "/better's brief check failed, so the brief is unchecked; do not start the work with it." }))

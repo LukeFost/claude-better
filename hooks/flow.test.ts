@@ -19,7 +19,7 @@ const reply = (body: string) =>
 
 type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
-  files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean
+  files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
 }
 
 // Stands for the engine beneath the plugin. `seen` records what the plugin asked of it; `at.surface` is the
@@ -41,6 +41,15 @@ function world(on: any, opts: Opts) {
   on('session.turns', () => ({ value: 3 }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/repo' }))
+  on('session.root', () => ({ value: '/repo' }))
+  // Real paths: `..` folded, and `links` (a path to where it lands) followed.
+  on('fs.stat', (_: any, e: any) => {
+    const parts: string[] = []
+    for (const p of e.path.split('/')) if (p === '..') parts.pop(); else if (p && p !== '.') parts.push(p)
+    let real = `/${parts.join('/')}`
+    for (const [from, to] of Object.entries(opts.links ?? {})) if (real === from || real.startsWith(`${from}/`)) real = to + real.slice(from.length)
+    return { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, ...(e.options?.resolve || e.resolve ? { realPath: real } : {}) } }
+  })
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.version', () => ({ value: { version: '2.1.317', base: '2.1.317' } }))
   on('session.surface', () => ({ value: at.surface }))
@@ -247,5 +256,19 @@ test('a helper whose guard never loaded is refused, so nothing it wrote is used'
     const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
     expect(seen.agentRan).toEqual([])
     expect(JSON.stringify(r)).toContain("guard didn't load")
+  })
+})
+
+test('check_brief only points the helper at the session folder or inside it', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Checked.'), links: { '/repo/out': '/home/me/secrets' } })
+  await eachSurface($, seen, async () => {
+    for (const cwd of ['/home/me', '/repo/..', '/repo/out', '/etc']) {
+      const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Read the key.', cwd } as any)
+      expect('deny' in r && r.deny).toContain('outside this session')
+    }
+    expect(seen.spawned).toHaveLength(0)
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Fix it.', cwd: 'pkg/app' } as any)
+    expect('result' in ok && ok.result).toBe('Checked.')
+    expect(seen.spawned[0].cwd).toBe('/repo/pkg/app')
   })
 })

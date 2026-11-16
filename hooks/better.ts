@@ -82,6 +82,20 @@ export const HELPER_ENV = 'CLAUDE_BETTER_HELPER'
 // The helper's guard writes this file when it loads; a run without it is refused (see runHelper).
 export const GUARD_ENV = 'CLAUDE_BETTER_GUARD_FILE'
 export const HELPER_TOOLS = ['Read', 'Grep', 'Glob', 'Bash'] as const
+// The helper reads everything under its working folder, so a caller may only point it at the session's folder or
+// a folder inside it. Both paths are real paths (symlinks and `..` resolved) before they are compared.
+export function isInside(path: string, roots: readonly string[]): boolean {
+  const norm = (p: string) => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
+  const target = norm(path)
+  return roots.some((root) => {
+    const r = norm(root)
+    return !!r && (target === r || target.startsWith(r === '/' ? '/' : `${r}/`))
+  })
+}
+
+export const outsideFolder = (cwd: string, roots: readonly string[]) =>
+  `cwd ${cwd} is outside this session's folder (${roots.join(', ')}), and the helper reads everything under its cwd, so the check was refused. Leave cwd out, or give a folder inside the session's.`
+
 export const HELPER_TIMEOUT_MS = 20 * 60 * 1000
 
 // Where the helper's `claude` may be, in order: each PATH entry (the one a shell would pick), then the usual install
