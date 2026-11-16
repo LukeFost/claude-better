@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
   BRIEF_MARK, GUARD_ENV, HELPER_ENV, isInside, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
-  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, parseMarkedPrompt, stageOf,
+  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
@@ -89,8 +89,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     if (stop.signal.aborted) {
       cancelled = stop.signal.reason !== 'timeout'
       error = cancelled ? 'cancelled' : `The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`
-    } else if (exit && exit.code !== 0) error = `${helperExitError(exit.code, exit.signal)}; its stderr is in ${log}`
-    else if (reader.resultError) error = `The helper's model call failed: ${reader.resultError}`
+    } else if (reader.resultError) error = `The helper's model call failed: ${reader.resultError}`
+    else if (exit && exit.code !== 0) error = `${helperExitError(exit.code, exit.signal)}; its stderr is in ${log}`
     else if (!reader.reply.trim()) error = 'The helper finished without replying'
     else {
       try {
@@ -114,11 +114,27 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
     kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
-    error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map((t) => `${t.state} ${t.label}`),
+    error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
     reply: reader.reply, checked,
   }
-  await $.fs.write(log, JSON.stringify(record, null, 2)).catch(() => {})
+  const pruneError = await pruneRuns($, `${home}/.claude/better/runs`)
+  await $.fs.write(log, JSON.stringify(pruneError ? { ...record, pruneError } : record, null, 2)).catch(() => {})
   return checked !== undefined && !error ? { ok: true, checked, log } : { ok: false, cancelled, error: error ?? 'unknown failure', log }
+}
+
+// Keeps the newest KEEP_RUNS records. $.fs has no delete, so the stale ones go to rm by exact name.
+async function pruneRuns($: EngineInterface, dir: string): Promise<string | undefined> {
+  try {
+    const stale = staleRecords((await $.fs.list(dir)).filter((e) => e.kind === 'file').map((e) => e.name), KEEP_RUNS)
+    if (!stale.length) return undefined
+    const child = $.process.spawn({ argv: ['/bin/rm', '-f', '--', ...stale.map((n) => `${dir}/${n}`)], cwd: dir })
+    for (;;) {
+      const step = await child.next()
+      if (step.done) return step.value.code === 0 ? undefined : `rm exited with code ${step.value.code}`
+    }
+  } catch (e) {
+    return (e as Error).message
+  }
 }
 
 // The improved prompt goes in the box above anything typed meanwhile; nothing is sent.

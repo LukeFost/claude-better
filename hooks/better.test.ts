@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  BRIEF_MARK, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
+  BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
+  staleRecords, toolLabel, toolLine,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -65,7 +66,7 @@ test('the stream reader follows tools, the reply and the stage', () => {
   // Split mid-line, as a pipe delivers it.
   r.push(text.slice(0, 50))
   r.push(text.slice(50))
-  expect(r.tools.map((t) => `${t.state} ${t.label}`)).toEqual(['ok cat README.md', 'failed Read ~/x.md'])
+  expect(r.tools.map((t) => `${t.state} ${t.label}`)).toEqual(['ok cat README.md (+1 more)', 'failed Read ~/x.md'])
   expect(stageOf(r.text).stage).toBe(2)
   r.push('not json from a hook\n')
   r.push(JSON.stringify({ type: 'result', subtype: 'success', result: 'final <improved-prompt>' }))
@@ -75,4 +76,21 @@ test('the stream reader follows tools, the reply and the stage', () => {
   const bad = new StreamReader('/', '')
   bad.push(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '' }) + '\n')
   expect(bad.resultError).toBe('error_during_execution')
+})
+
+test('a compound command is labelled as more than its first part, and a refusal keeps its reason', () => {
+  expect(toolLabel('Bash', { command: 'cat README.md' }, '/w', '/h')).toBe('cat README.md')
+  expect(toolLabel('Bash', { command: "cat README.md; sed 's/=.*//' .env" }, '/w', '/h')).toBe('cat README.md (+1 more)')
+  expect(toolLabel('Bash', { command: 'cd /w && cat a | head -5' }, '/w', '/h')).toBe('cat a (+1 more)')
+  const r = new StreamReader('/w', '/h')
+  r.push(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'cat a; sed x b' } }] } }) + '\n')
+  r.push(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text: 'Permission to use Bash denied:\nnot read-only' }] }] } }) + '\n')
+  expect(r.tools.map(toolLine)).toEqual(['failed cat a (+1 more): Permission to use Bash denied: not read-only'])
+})
+
+test('only the oldest run records beyond the cap are stale, and nothing else in the folder', () => {
+  const names = Array.from({ length: KEEP_RUNS + 3 }, (_, i) => `2026-11-16T04-29-18-${String(i).padStart(3, '0')}Z-${i % 2 ? 'brief' : 'better'}-0000abcd.json`)
+  const stale = staleRecords([...names].reverse().concat(['notes.txt', 'other.json', 'x-better-1.json']))
+  expect(stale).toEqual(names.slice(0, 3))
+  expect(staleRecords(names.slice(0, 5))).toEqual([])
 })

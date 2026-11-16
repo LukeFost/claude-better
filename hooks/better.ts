@@ -148,7 +148,7 @@ export function helperVerdict(tool: string, isReadOnly: boolean | undefined): { 
   return { decision: 'deny', reason: `/better's helper only reads and rewrites, so ${why}. Use Read, Grep, Glob or a read-only Bash command.` }
 }
 
-export type ToolRow = { id: string; label: string; state: 'running' | 'ok' | 'failed' }
+export type ToolRow = { id: string; label: string; state: 'running' | 'ok' | 'failed'; why?: string }
 
 export function shortPath(path: string, cwd: string, home: string): string {
   if (path === cwd) return '.'
@@ -160,7 +160,8 @@ export function shortPath(path: string, cwd: string, home: string): string {
 export function toolLabel(name: string, input: any, cwd: string, home: string): string {
   let label = name
   if (name === 'Bash' && typeof input?.command === 'string') {
-    const first = input.command.split(/\s*(?:&&|\|\||;|\|)\s*/).map((p: string) => p.trim()).find((p: string) => p && !/^cd\s/.test(p)) ?? ''
+    const parts = input.command.split(/\s*(?:&&|\|\||;|\|)\s*/).map((p: string) => p.trim()).filter((p: string) => p && !/^cd\s/.test(p))
+    const first = (parts[0] ?? '') + (parts.length > 1 ? ` (+${parts.length - 1} more)` : '')
     label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (p: string) => shortPath(p, cwd, home))
   } else {
     const path = typeof input?.file_path === 'string' ? input.file_path : typeof input?.path === 'string' ? input.path : undefined
@@ -168,6 +169,22 @@ export function toolLabel(name: string, input: any, cwd: string, home: string): 
     if (typeof target === 'string') label = `${name} ${target}`
   }
   return label.replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim() || name
+}
+
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join(' ')
+  return ''
+}
+
+export const toolLine = (t: ToolRow) => `${t.state} ${t.label}${t.why ? `: ${t.why}` : ''}`
+
+export const KEEP_RUNS = 200
+const RUN_RECORD = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:better|brief)-[0-9a-f]{8}\.json$/
+
+export function staleRecords(names: readonly string[], keep = KEEP_RUNS): string[] {
+  const records = names.filter((n) => RUN_RECORD.test(n)).sort()
+  return records.slice(0, Math.max(0, records.length - keep))
 }
 
 // Reads `claude -p --output-format stream-json` line by line, as pi-better reads `pi --mode json`.
@@ -231,6 +248,7 @@ export class StreamReader {
         const tool = part.type === 'tool_result' && this.tools.find((t) => t.id === part.tool_use_id)
         if (tool) {
           tool.state = part.is_error ? 'failed' : 'ok'
+          if (part.is_error) tool.why = resultText(part.content).replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 200)
           changed = true
         }
       }

@@ -21,7 +21,7 @@ const TOOLS = [
     description: [
       "Deepen the user's prompt with a read-only helper that reads the code it touches, then hand the improved prompt back without acting on it.",
       'Use for /better. The helper cannot see this chat, so pass what the chat established in `context`.',
-      'In the Cursor app the result is offered in a "Create chat with prompt" dialog and goes to the clipboard; show it once and stop: never carry it out.',
+      'In the Cursor app the result is offered in a "Create chat with prompt" dialog, or put on the clipboard when the dialog can not take it; show it once and stop: never carry it out.',
     ].join(' '),
     inputSchema: {
       type: 'object',
@@ -143,10 +143,10 @@ async function call(id: string | number, name: string, args: any, progressToken:
     // Stopped after the helper's last word but before the hand-off: drop the result rather than pop a dialog.
     if (stop.signal.aborted || stoppedSince(cwd, since)) return { isError: true, content: [{ type: 'text', text: '/better was cancelled; nothing was produced.' }] }
     const link = openInNewChat(out.text)
-    const copied = toClipboard(out.text)
+    const copied = !link.opened && toClipboard(out.text)
     const skipped = !link.opened && link.why ? ` Cursor's prompt link can't take it (${link.why}), so there is no dialog.` : ''
     const where = link.opened
-      ? `Cursor is offering it in a "Create chat with prompt" dialog${copied ? ', and it is on the clipboard' : ''}; nothing was sent.`
+      ? 'Cursor is offering it in a "Create chat with prompt" dialog; nothing was sent.'
       : `${copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'}${skipped}`
     return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {

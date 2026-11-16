@@ -2,12 +2,12 @@
 // into it (fail closed: a run whose guard never wrote its proof is refused). Every run leaves a record (mode 0600)
 // in ~/.claude/better/runs with "from": "cursor".
 import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates,
-  helperArgv, helperExitError, parseMarkedPrompt, stageOf,
+  helperArgv, helperExitError, KEEP_RUNS, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from '../hooks/better.ts'
 
 export type Kind = 'better' | 'brief'
@@ -16,6 +16,16 @@ export type Outcome = { ok: true; text: string; log: string } | { ok: false; can
 // The Claude Code plugin whose guard the helper loads: this file's folder's parent, symlinks resolved.
 export const PLUGIN_ROOT = resolve(dirname(realpathSync(new URL(import.meta.url).pathname)), '..')
 
+export function pruneRuns(dir: string, keep = KEEP_RUNS - 1): void {
+  try {
+    for (const name of staleRecords(readdirSync(dir), keep)) {
+      try {
+        unlinkSync(`${dir}/${name}`)
+      } catch {}
+    }
+  } catch {}
+}
+
 export function runHelper(req: {
   kind: Kind; input: string; cwd: string; model?: string; signal?: AbortSignal
   onStage?: (stage: number, total: number, label: string) => void
@@ -23,6 +33,7 @@ export function runHelper(req: {
   const home = process.env.HOME ?? ''
   const runs = `${home}/.claude/better/runs`
   mkdirSync(runs, { recursive: true })
+  pruneRuns(runs)
   const log = `${runs}/${new Date().toISOString().replace(/[:.]/g, '-')}-${req.kind}-${randomUUID().slice(0, 8)}.json`
   const claude = claudeCandidates(process.env.PATH ?? '', home).find((p) => existsSync(p))
   const argv = helperArgv({ claude: claude ?? 'claude', model: req.model, pluginRoot: PLUGIN_ROOT })
@@ -70,12 +81,12 @@ export function runHelper(req: {
       try {
         isGuardLoaded = JSON.parse(readFileSync(log, 'utf8'))?.isGuardLoaded === true
       } catch {}
-      const record = { exit: { code, signal }, cancelled: stopped === 'cancelled', isGuardLoaded, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map((t) => `${t.state} ${t.label}`), reply: reader.reply }
+      const record = { exit: { code, signal }, cancelled: stopped === 'cancelled', isGuardLoaded, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine), reply: reader.reply }
       const fail = (error: string, cancelled = false) => done(settle(record, { ok: false, cancelled, error, log }))
       if (stopped === 'cancelled') return fail('cancelled', true)
       if (stopped === 'timeout') return fail(`The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`)
-      if (code !== 0) return fail(`${helperExitError(code, signal)}; its stderr is in ${log}`)
       if (reader.resultError) return fail(`The helper's model call failed: ${reader.resultError}`)
+      if (code !== 0) return fail(`${helperExitError(code, signal)}; its stderr is in ${log}`)
       if (!isGuardLoaded) return fail(`The helper's read-only guard didn't load, so its result was not used. Check that ${PLUGIN_ROOT}/hooks/register.tsx loads (claude plugin validate ${PLUGIN_ROOT}).`)
       let text: string
       try {
