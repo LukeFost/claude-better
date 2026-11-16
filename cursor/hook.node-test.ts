@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { planBrief } from './hook.ts'
-import { recordStop, stoppedSince } from './stops.ts'
+import { recordStop, runOnce, stoppedSince } from './stops.ts'
+import { writeFileSync } from 'node:fs'
 
 test("Cursor's stop button: a stop marker cancels runs in that workspace that began before it, and nothing else", () => {
   const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
@@ -37,4 +38,18 @@ test('a subagent prompt marked "/better " is checked before the subagent starts;
   assert.ok('deny' in (call('Task', '/better ') as object))
   assert.ok('deny' in (call('Task', '/better do it', ['/']) as object)) // never the filesystem root
   assert.ok('deny' in (call('Task', '/better do it', []) as object))
+})
+
+test('two copies of the hook share one helper run per call, and a dead holder is taken over', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'better-once-'))
+  let runs = 0
+  const work = async () => {
+    runs++
+    await new Promise((r) => setTimeout(r, 200))
+    return 'checked'
+  }
+  const [a, b] = await Promise.all([runOnce('k', work, dir), runOnce('k', work, dir)])
+  assert.deepEqual([a, b, runs], ['checked', 'checked', 1])
+  writeFileSync(join(dir, 'dead.lock'), '999999') // a holder that no longer runs
+  assert.equal(await runOnce('dead', async () => 'mine', dir, 5_000), 'mine')
 })

@@ -62,13 +62,15 @@ The same `/better` works in Cursor's agent, in the desktop app and in `cursor-ag
 git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/better
 ```
 
-Then reload Cursor and type `/better <prompt>` in a chat, or start a subagent prompt with `/better `. For `cursor-agent`, add `--plugin-dir ~/.cursor/plugins/local/better`. To update, `git pull` in that folder; to remove, use Remove in Cursor's plugin settings or delete the folder.
+If the Claude Code plugin is already installed, Cursor imports it from Claude Code, so skip the clone: two copies run every hook twice. Otherwise, reload Cursor and type `/better <prompt>` in a chat, or start a subagent prompt with `/better `. For `cursor-agent`, add `--plugin-dir ~/.cursor/plugins/local/better`. To update, `git pull` in that folder; to remove, use Remove in Cursor's plugin settings or delete the folder.
 
 How it differs from the Claude Code plugin:
 
 - The helper can't fork the Cursor chat, so the agent passes what the chat established along with the prompt.
 - The stages show on the tool card. When it's done, Cursor's prompt link offers the improved prompt in a "Create chat with prompt" dialog and it goes on the clipboard. Click Create Chat to start a chat with it, or Cancel. In `cursor-agent`, or when the link refuses it (over 10,000 characters encoded, or text Cursor flags, such as `.env` paths), it goes on the clipboard only. Nothing is sent.
-- Cancel with Cursor's stop button: the helper stops and nothing is produced.
+- Cancel with Cursor's stop button: the plugin's `stop` hook stops the helper and nothing is produced. Cursor tells the MCP server nothing, so the hook leaves a marker in `~/.claude/better/cursor-stops` that the server checks; a stop in the same workspace also cancels a run in another chat there.
+- A subagent prompt that starts with `/better ` is checked by the plugin's `preToolUse` hook, which swaps in the checked brief, or refuses the start if the check fails.
+- `cursor-agent` gives up on an MCP call after 60 seconds, so a longer `/better` run fails there with "Request timed out".
 - There is no `/better-boomerang`.
 - Run records go to `~/.claude/better/runs` with `"from": "cursor"`.
 - If the plugin isn't loaded, Cursor has no `/better` command, and the agent may take `/better <prompt>` as a plain task and start on it. Check that Cursor lists the `better` tools before you rely on it.
@@ -92,7 +94,8 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 21 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 22 tests; the flows run on the terminal and desktop surfaces
+node --test 'cursor/*.node-test.ts'   # the Cursor hooks (plain Node)
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
 ```
 

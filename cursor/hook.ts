@@ -4,7 +4,8 @@
 //               checked brief, as the Claude Code mod does; if the check fails the subagent doesn't start
 import { realpathSync } from 'node:fs'
 import { runHelper } from './helper.ts'
-import { recordStop } from './stops.ts'
+import { recordStop, runOnce } from './stops.ts'
+import { createHash } from 'node:crypto'
 
 const MARK = /^\/better(\s|$)/
 
@@ -44,11 +45,15 @@ async function main() {
   if (input.hook_event_name === 'preToolUse') {
     const plan = planBrief(input)
     if ('pass' in plan) return say({})
-    const deny = (why: string) => say({ permission: 'deny', user_message: why, agent_message: `${why} Do not start the subagent with the unchecked brief.` })
-    if ('deny' in plan) return deny(`/better: ${plan.deny}`)
-    const out = await runHelper({ kind: 'brief', input: plan.brief, cwd: plan.cwd })
-    if (!out.ok) return deny(out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}`)
-    return say({ updated_input: { ...input.tool_input, prompt: out.text } })
+    const deny = (why: string) => ({ permission: 'deny', user_message: why, agent_message: `${why} Do not start the subagent with the unchecked brief.` })
+    if ('deny' in plan) return say(deny(`/better: ${plan.deny}`))
+    const key = createHash('sha256').update(JSON.stringify([input.conversation_id, input.generation_id, input.tool_input.prompt])).digest('hex').slice(0, 32)
+    const answer = await runOnce(key, async () => {
+      const out = await runHelper({ kind: 'brief', input: plan.brief, cwd: plan.cwd })
+      if (!out.ok) return JSON.stringify(deny(out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}`))
+      return JSON.stringify({ updated_input: { ...input.tool_input, prompt: out.text } })
+    }).catch((e) => JSON.stringify(deny(`/better couldn't check this subagent brief, so the subagent didn't start: ${(e as Error).message}`)))
+    return process.stdout.write(answer)
   }
   say({})
 }
