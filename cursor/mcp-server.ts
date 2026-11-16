@@ -1,5 +1,5 @@
 // The /better MCP server for Cursor (stdio, newline-delimited JSON-RPC). Two tools:
-//   better       deepen a prompt; the result goes to a new chat box in the Cursor app (its prompt link), else the clipboard
+//   better       deepen a prompt; the Cursor app offers the result in a "Create chat with prompt" dialog (its prompt link), and it goes to the clipboard
 //   check_brief  check a subagent brief; returns it to use verbatim
 // Progress shows on the tool card (notifications/progress), and Cursor's stop button cancels the helper.
 import { spawn, spawnSync } from 'node:child_process'
@@ -20,7 +20,7 @@ const TOOLS = [
     description: [
       "Deepen the user's prompt with a read-only helper that reads the code it touches, then hand the improved prompt back without acting on it.",
       'Use for /better. The helper cannot see this chat, so pass what the chat established in `context`.',
-      'The result opens in a new chat box in the Cursor app (or goes to the clipboard); show it once and stop: never carry it out.',
+      'In the Cursor app the result is offered in a "Create chat with prompt" dialog and goes to the clipboard; show it once and stop: never carry it out.',
     ].join(' '),
     inputSchema: {
       type: 'object',
@@ -106,7 +106,8 @@ function openInNewChat(text: string): boolean {
   if (process.platform !== 'darwin' || !isCursorApp()) return false
   const url = `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(text)}`
   if (url.length > PROMPT_LINK_MAX) return false
-  spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
+  // -g: hand the link to Cursor without bringing it forward, so a user who switched apps mid-run keeps their focus.
+  spawn('open', ['-g', url], { stdio: 'ignore', detached: true }).unref()
   return true
 }
 
@@ -137,7 +138,7 @@ async function call(id: string | number, name: string, args: any, progressToken:
     const opened = openInNewChat(out.text)
     const copied = toClipboard(out.text)
     const where = opened
-      ? `It is open in a new chat box${copied ? ' and on the clipboard' : ''}, not sent.`
+      ? `Cursor is offering it in a "Create chat with prompt" dialog${copied ? ', and it is on the clipboard' : ''}; nothing was sent.`
       : copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'
     return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {
