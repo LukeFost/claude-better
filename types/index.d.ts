@@ -1,0 +1,27 @@
+export type BetterToolRow = { id: string; label: string; state: 'running' | 'ok' | 'failed' }
+
+export type BetterRun = {
+  id: string
+  startedAt: number
+  stage: number
+  label: string
+  tools: BetterToolRow[]
+}
+
+export type BetterBoomerang = {
+  agentId: string
+  startedAt: number
+  status: 'running' | 'ready'
+  improved?: string
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    better: {
+      run: BetterRun | null
+      briefs: number
+      boomerang: BetterBoomerang | null
+      tick: number
+    }
+  }
+}
