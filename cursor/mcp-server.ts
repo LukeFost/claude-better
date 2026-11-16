@@ -130,10 +130,10 @@ async function call(id: string | number, name: string, args: any, progressToken:
     const link = openInNewChat(out.text)
     const copied = !link.opened && toClipboard(out.text)
     const skipped = !link.opened && link.why ? ` Cursor's prompt link can't take it (${link.why}), so there is no dialog.` : ''
-    const where = link.opened
+    const said = link.opened
       ? 'Cursor is offering it in a "Create chat with prompt" dialog; nothing was sent.'
       : `${copied ? 'It is on the clipboard, not sent.' : 'Copy it from here; nothing was sent.'}${skipped}`
-    return { content: [{ type: 'text', text: `${where} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
+    return { content: [{ type: 'text', text: `${said} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {
     clearInterval(watch)
     calls.delete(id)

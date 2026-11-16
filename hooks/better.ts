@@ -72,8 +72,8 @@ export function handOverText(improved: string, draft: string): string {
 export const HELPER_ENV = 'CLAUDE_BETTER_HELPER'
 export const GUARD_ENV = 'CLAUDE_BETTER_GUARD_FILE'
 export const HELPER_TOOLS = ['Read', 'Grep', 'Glob', 'Bash'] as const
+const norm = (p: string) => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
 export function isInside(path: string, roots: readonly string[]): boolean {
-  const norm = (p: string) => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
   const target = norm(path)
   return roots.some((root) => {
     const r = norm(root)
@@ -143,7 +143,7 @@ export function toolLabel(name: string, input: any, cwd: string, home: string): 
     const target = path ? shortPath(path, cwd, home) : input?.pattern
     if (typeof target === 'string') label = `${name} ${target}`
   }
-  return label.replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim() || name
+  return label.replace(/[\s\p{Cc}]+/gu, ' ').trim() || name
 }
 
 function resultText(content: unknown): string {
@@ -158,7 +158,7 @@ export const KEEP_RUNS = 200
 const RUN_RECORD = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:better|brief)-[0-9a-f]{8}\.json$/
 
 export function staleRecords(names: readonly string[], keep = KEEP_RUNS): string[] {
-  const records = names.filter((n) => RUN_RECORD.test(n)).sort()
+  const records = names.filter((n) => RUN_RECORD.test(n)).toSorted()
   return records.slice(0, Math.max(0, records.length - keep))
 }
 
@@ -221,7 +221,7 @@ export class StreamReader {
         const tool = part.type === 'tool_result' && this.tools.find((t) => t.id === part.tool_use_id)
         if (tool) {
           tool.state = part.is_error ? 'failed' : 'ok'
-          if (part.is_error) tool.why = resultText(part.content).replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 200)
+          if (part.is_error) tool.why = resultText(part.content).replace(/[\s\p{Cc}]+/gu, ' ').trim().slice(0, 200)
           changed = true
         }
       }

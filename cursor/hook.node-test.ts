@@ -8,6 +8,8 @@ import { planBrief } from './hook.ts'
 import { isWorkspaceRoot, recordStop, runOnce, stoppedSince } from './stops.ts'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 
+const onError = (e: Error) => `deny: ${e.message}`
+
 test("Cursor's stop button: a stop marker cancels runs in that workspace that began before it, and nothing else", () => {
   const dir = mkdtempSync(join(tmpdir(), 'better-stops-'))
   const ws = realpathSync(mkdtempSync(join(tmpdir(), 'better-ws-')))
@@ -82,7 +84,6 @@ test('a failed check is shared too: the other copy gets the same answer and no s
     await new Promise((r) => setTimeout(r, 200))
     throw new Error('helper failed')
   }
-  const onError = (e: Error) => `deny: ${e.message}`
   const [a, b] = await Promise.all([runOnce('f', work, dir, 5_000, onError), runOnce('f', work, dir, 5_000, onError)])
   assert.deepEqual([a, b, runs], ['deny: helper failed', 'deny: helper failed', 1])
   assert.equal(statSync(join(dir, 'f.out')).mode & 0o777, 0o600)

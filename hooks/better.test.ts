@@ -86,7 +86,7 @@ test('a compound command is labelled as more than its first part, and a refusal 
 
 test('only the oldest run records beyond the cap are stale, and nothing else in the folder', () => {
   const names = Array.from({ length: KEEP_RUNS + 3 }, (_, i) => `2026-11-16T04-29-18-${String(i).padStart(3, '0')}Z-${i % 2 ? 'brief' : 'better'}-0000abcd.json`)
-  const stale = staleRecords([...names].reverse().concat(['notes.txt', 'other.json', 'x-better-1.json']))
+  const stale = staleRecords(names.toReversed().concat(['notes.txt', 'other.json', 'x-better-1.json']))
   expect(stale).toEqual(names.slice(0, 3))
   expect(staleRecords(names.slice(0, 5))).toEqual([])
 })

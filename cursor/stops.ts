@@ -28,6 +28,15 @@ export function recordStop(roots: unknown, dir = stopsDir(), now = Date.now(), h
   writeFileSync(join(dir, `${now}-${process.pid}.json`), JSON.stringify({ at: now, roots: list }))
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function runOnce(key: string, work: () => Promise<string>, dir = join(stopsDir(), '..', 'cursor-once'), waitMs = 21 * 60 * 1000, onError = (e: Error) => { throw e }): Promise<string> {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const lock = join(dir, `${key}.lock`)
@@ -37,14 +46,6 @@ export async function runOnce(key: string, work: () => Promise<string>, dir = jo
     try {
       if (Date.now() - statSync(file).mtimeMs > 60 * 60 * 1000) unlinkSync(file)
     } catch {}
-  }
-  const alive = (pid: number) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch {
-      return false
-    }
   }
   const end = Date.now() + waitMs
   while (Date.now() < end) {

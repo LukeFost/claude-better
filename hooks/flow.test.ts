@@ -30,7 +30,7 @@ function world(on: any, opts: Opts) {
     },
   }
   const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
-  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', ...(opts.env ?? {}) })
+  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', ...opts.env })
   on('command.register', () => ({ value: {} }))
   on('tool.register', () => ({ value: {} }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
