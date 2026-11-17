@@ -38,7 +38,7 @@ While it works, a two-row strip (the *band*) above the input box shows what the 
 |---|---|
 | Deepen a prompt | `/better <prompt>` |
 | Deepen the task in progress, including your feedback so far | `/better` |
-| Review, edit and send the result (desktop app) | the "/better draft" pane: `Send to thread`, `Edit`, `to input box`, `drop` |
+| Review, edit and send the result (desktop app) | the "/better draft" pane: `Send to thread`, `Edit`, `input box`, `drop` |
 | Stop it | `/better-cancel`, or press `cancel` in the band (click it in the desktop app; in the terminal, ctrl+x tab, then Enter) |
 | Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back`. Not in auto mode. |
 | An agent checks a brief before a new thread or subagent | the `mcp__better__check_brief` tool, or an Agent prompt that starts with `/better ` |

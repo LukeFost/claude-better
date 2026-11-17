@@ -641,14 +641,17 @@ export const register: Register = (on) => {
         {draft.isSending
           ? <Text key="status" dimColor>Sending when Claude's turn ends.</Text>
           : (
-            <Box flexWrap="wrap">
-              <Button key="send" variant="primary" label="Send to thread" onPress={() => void endDraft($, 'sent', e.surface).catch((err) => $.ui.toast(`Couldn't send the draft: ${(err as Error).message}`))} />
-              <Text>  </Text>
-              <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
-              <Text>   </Text>
-              <Button key="box" plain dimColor label="to input box" onPress={() => endDraft($, 'box', e.surface)} />
-              <Text dimColor> · </Text>
-              <Button key="drop" plain dimColor label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
+            <Box flexWrap="wrap" justifyContent="space-between">
+              <Box>
+                <Button key="send" variant="primary" label="Send to thread" onPress={() => void endDraft($, 'sent', e.surface).catch((err) => $.ui.toast(`Couldn't send the draft: ${(err as Error).message}`))} />
+                <Text>  </Text>
+                <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
+              </Box>
+              <Box>
+                <Button key="box" plain dimColor label="input box" onPress={() => endDraft($, 'box', e.surface)} />
+                <Text>   </Text>
+                <Button key="drop" plain dimColor label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
+              </Box>
             </Box>
           )}
         {draft.isEdited && !draft.isSending ? <Text key="status" dimColor>Edited by you.</Text> : null}
