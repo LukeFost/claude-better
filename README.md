@@ -105,7 +105,7 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 24 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 30 tests; the flows run on the terminal and desktop surfaces
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
