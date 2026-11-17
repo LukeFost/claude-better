@@ -285,7 +285,8 @@ async function showDraft($: EngineInterface, improved: string, opts: { saveTo?: 
   S.edit = undefined
   await noteHandover($, opts.log, { result: 'pane', tries: 0, ...(path ? { savedTo: path } : {}) })
   const replaced = prior ? ` It replaced an earlier draft${prior.path ? `, which is saved in ${prior.path}` : ''}.` : ''
-  $.ui.toast(`The improved prompt is in the ${DRAFT_TITLE} pane. Edit it there, then press "Send to thread". Nothing is sent until you do.${replaced}${opts.note ?? ''}`, { timeoutMs: 10000 })
+  const news = `${replaced}${opts.note ?? ''}`.trim()
+  if (news) $.ui.toast(`The ${DRAFT_TITLE} pane has a new draft.${news ? ` ${news}` : ''}`, { timeoutMs: 10000 })
   return true
 }
 
@@ -313,7 +314,7 @@ async function endDraft($: EngineInterface, how: 'sent' | 'box' | 'dropped', sur
   await $.ui.close({ id: DRAFT_PANE }).catch(() => {})
   if (how === 'box') return void (await handOver($, text, { surface, log: draft.log, saveTo: draft.path, extra: done }))
   await noteHandover($, draft.log, { result: how, tries: 0, ...done })
-  $.ui.toast(how === 'sent' ? 'The draft was sent to the thread.' : `The draft was dropped; nothing was sent.${draft.path ? ` A copy is in ${draft.path}.` : ''}`, { timeoutMs: 8000 })
+  if (how === 'dropped') $.ui.toast(`The draft was dropped; nothing was sent.${draft.path ? ` A copy is in ${draft.path}.` : ''}`, { timeoutMs: 8000 })
 }
 
 function startTicker($: EngineInterface): void {
@@ -340,7 +341,7 @@ async function back($: EngineInterface, surface?: Surface): Promise<string | und
   }
   if (!boom?.improved) {
     const waiting = await read($, waitingA)
-    if (!waiting) return 'No /better prompt is waiting.'
+    if (!waiting) return 'No /better draft is waiting.'
     return (await handOver($, waiting.improved, { surface, log: waiting.log, isRetry: true })) ? undefined : `The input box still couldn't take the prompt${waiting.path ? `; it is saved in ${waiting.path}` : ''}. Nothing was sent.`
   }
   const viewed = await $.ui.view({})
@@ -590,10 +591,10 @@ export const register: Register = (on) => {
       rows.push(
         <Box key="waiting" flexDirection="column">
           <Box>
-            <Text color="claude">/better's prompt is waiting  </Text>
+            <Text color="claude">/better's draft is waiting  </Text>
             <Button key="put" variant="primary" label="Put in input box" onPress={async () => void (await handOver($, waiting.improved, { surface: e.surface, log: waiting.log, isRetry: true }))} />
             <Text>  </Text>
-            <Button key="drop" plain label="dismiss" onPress={() => update($, waitingA, () => null)} />
+            <Button key="drop" plain label="drop" onPress={() => update($, waitingA, () => null)} />
           </Box>
           {waiting.path ? <Text dimColor>   {waiting.path}</Text> : null}
         </Box>,
@@ -625,30 +626,35 @@ export const register: Register = (on) => {
     if (draft.isEditing) {
       return (
         <Box flexDirection="column">
-          <Input key="edit" rows={editRows(draft.text)} value={S.edit ?? draft.text} submitLabel="save" onInput={(value) => void (S.edit = value)} onSubmit={(value) => saveEdit($, value)} />
-          <Text dimColor>Enter saves your edit. Shift+Enter adds a line. Nothing is sent from here.</Text>
+          <Text dimColor>Editing. Enter saves, Shift+Enter adds a line. Nothing is sent from here.</Text>
           <Box>
             <Button key="done" variant="primary" label="Done" onPress={() => saveEdit($, S.edit)} />
             <Text>  </Text>
             <Button key="undo" plain label="discard edit" onPress={() => saveEdit($, undefined)} />
           </Box>
+          <Input key="edit" rows={editRows(draft.text)} value={S.edit ?? draft.text} submitLabel="save" onInput={(value) => void (S.edit = value)} onSubmit={(value) => saveEdit($, value)} />
         </Box>
       )
     }
     return (
       <Box flexDirection="column">
-        <Box>
-          <Button key="send" variant="primary" label="Send to thread" onPress={() => void endDraft($, 'sent', e.surface).catch((err) => $.ui.toast(`Couldn't send the draft: ${(err as Error).message}`))} />
-          <Text>  </Text>
-          <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
+        {draft.isSending
+          ? <Text key="status" dimColor>Sending when Claude's turn ends.</Text>
+          : (
+            <Box flexWrap="wrap">
+              <Button key="send" variant="primary" label="Send to thread" onPress={() => void endDraft($, 'sent', e.surface).catch((err) => $.ui.toast(`Couldn't send the draft: ${(err as Error).message}`))} />
+              <Text>  </Text>
+              <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
+              <Text>   </Text>
+              <Button key="box" plain dimColor label="to input box" onPress={() => endDraft($, 'box', e.surface)} />
+              <Text dimColor> · </Text>
+              <Button key="drop" plain dimColor label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
+            </Box>
+          )}
+        {draft.isEdited && !draft.isSending ? <Text key="status" dimColor>Edited by you.</Text> : null}
+        <Box marginTop={1}>
+          <Markdown text={draft.text} />
         </Box>
-        <Box>
-          <Button key="box" label="Put in input box" onPress={() => endDraft($, 'box', e.surface)} />
-          <Text>  </Text>
-          <Button key="drop" plain label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
-        </Box>
-        <Text dimColor>{draft.isSending ? 'Sending. If Claude is busy, it goes when the running turn ends.' : `${draft.isEdited ? 'Edited by you. ' : ''}Nothing is sent until you press "Send to thread".`}</Text>
-        <Markdown text={draft.text} />
       </Box>
     )
   })

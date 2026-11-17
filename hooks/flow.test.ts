@@ -458,7 +458,7 @@ test('the waiting prompt goes in the box from the band button or /better-back on
     expect(back.text).toContain('is in your input box')
     expect(lastRecord(seen).handover).toEqual({ result: 'filled_later', tries: 1 })
     expect(seen.filled).toEqual(['Deeper prompt.'])
-    expect((await $.command.run({ command: 'better-back', args: '' } as any)).text).toContain('No /better prompt is waiting')
+    expect((await $.command.run({ command: 'better-back', args: '' } as any)).text).toContain('No /better draft is waiting')
   })
 })
 
@@ -559,7 +559,7 @@ test('on desktop the improved prompt opens in a draft pane, saved beside its rec
   const md = seen.writes.find((p) => p.endsWith('.md'))!
   expect(seen.written.get(md)).toBe('# Deeper prompt\n\n- one\n')
   expect(lastRecord(seen).handover).toEqual({ result: 'pane', tries: 0, savedTo: md })
-  expect(seen.toasts.at(-1)).toContain('Nothing is sent until you do')
+  expect(seen.toasts.filter((t) => /pane/.test(t))).toEqual([])
   const ui = await $.ui.mount(PANE)
   expect((await ui.find({ type: 'Markdown' }))?.text).toBe('# Deeper prompt\n\n- one')
   expect(await ui.find({ type: 'Button', key: 'send' })).toBeDefined()
@@ -595,7 +595,7 @@ test('Edit shows the prompt in a text box; Enter saves the edit without sending,
   expect(seen.submitted.map((e) => [e.text, e.origin?.asUser])).toEqual([['Deeper prompt.\n\nMy line.', true]])
   expect(seen.closed).toEqual(['better-draft'])
   expect(lastRecord(seen).handover).toEqual({ result: 'sent', tries: 0, viaPane: true, isEdited: true })
-  expect(seen.toasts.at(-1)).toContain('sent to the thread')
+  expect(seen.toasts.filter((t) => /sent to the thread/.test(t))).toEqual([])
   await ui.press({ key: 'send' }).catch(() => {})
   expect(seen.submitted).toHaveLength(1)
   await ui.unmount()
@@ -660,4 +660,30 @@ test('/better-back reopens the draft pane with the draft still in it, and sends 
   expect(seen.submitted).toEqual([])
   expect(seen.filled).toEqual([])
   await ui.unmount()
+})
+
+test('a draft whose pane the person closed shows a Show draft row; pressing it reopens the pane and sends nothing', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true })
+  // No test can play the person's close, so the stored draft is read back as that close leaves it.
+  let isHidden = false
+  on('state.get', async (_: any, e: any, next: any) => {
+    const got = await next(e)
+    const draft = got?.value?.value
+    return isHidden && e.key === 'draft' && draft ? { value: { ...got.value, value: { ...draft, isHidden: true } } } : got
+  })
+  await draftOnDesktop($, seen)
+  let band = await $.ui.mount({ plugin: 'better', surface: 'desktop', ...BAND })
+  expect(await band.find({ type: 'Button', key: 'show' })).toBeUndefined()
+  await band.unmount()
+  isHidden = true
+  band = await $.ui.mount({ plugin: 'better', surface: 'desktop', ...BAND })
+  expect(await band.find({ type: 'Text', text: /draft is waiting/ })).toBeDefined()
+  await band.press({ key: 'show' })
+  expect(seen.opened.at(-1)).toEqual({ id: 'better-draft', title: '/better draft', focus: true })
+  isHidden = false
+  await band.redraw()
+  expect(await band.find({ type: 'Button', key: 'show' })).toBeUndefined()
+  expect(seen.submitted).toEqual([])
+  expect(seen.filled).toEqual([])
+  await band.unmount()
 })
