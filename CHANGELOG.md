@@ -4,6 +4,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-17
+
 ### Changed
 
 - The draft pane's controls take two short lines above the prompt instead of four (one line when the pane is wide enough): `Send to thread` and `Edit`, then the quieter `input box` and `drop`. A status line shows only when there is news ("Edited by you", or that it is sending), and while sending the buttons are hidden.
@@ -95,7 +97,9 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.1
+[0.5.0]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.0
 [0.4.9]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.9
 [0.4.8]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.8
 [0.4.7]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.7

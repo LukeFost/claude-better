@@ -26,7 +26,7 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 ```
 
 </td></tr>
-<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.5.0. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.5.1. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
 
