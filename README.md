@@ -26,13 +26,13 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 ```
 
 </td></tr>
-<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. If Claude Code asks whether you trust the folder, say yes: the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.3. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.3. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
 
 ## Use: commands
 
-While it works, a two-row strip (the *band*) above the input box shows what the helper is reading and a `cancel` button. A ✗ chip is normal: it is usually a Bash read the guard refused, and the helper reads the file another way. The result can be taller than your terminal, so scroll the input box to see all of it.
+While it works, a two-row strip (the *band*) above the input box shows what the helper is reading and a `cancel` button. Failed tools (a ✗ chip, or "2 failed" in the tool count) are normal: usually a Bash read the guard refused or a command that exited non-zero, and the helper reads the file another way. The result can be taller than your terminal, so scroll the input box to see all of it.
 
 | Want | Do |
 |---|---|
@@ -79,7 +79,7 @@ From an A/B test of 7 real tasks, 2 runs each, graded blind ([`docs/ab-test.md`]
 | The prompt goes above your draft | The same, using `$.prompt.read` and `$.prompt.fill`. If the box can't take it, the prompt goes on the clipboard. |
 | `/better-boomerang`: runs in the chat, then `navigateTree` back | A read-only fork subagent shown in the main view (`$.ui.view`). Back is one press or `/better-back`. The main conversation never sees the research. |
 | A `/better` subagent brief is checked with brief.md, and a failure blocks the start | The same, on the `Agent` tool. A failure, a cancel or a reply with no marked brief refuses the call, so no subagent starts. |
-| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` (also with `CLAUDE_CONFIG_DIR` set) holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. Only the newest 200 are kept. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
+| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` (always there, even when `CLAUDE_CONFIG_DIR` points elsewhere) holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. Only the newest 200 are kept. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
 
 ## Cursor
 
@@ -108,7 +108,7 @@ How it differs from the Claude Code plugin:
 - **While a turn is running, Claude Code queues `/better`**, and it starts when the turn ends. Once it is running you can keep working; it is never blocked.
 - **The return from boomerang is one press, not automatic.** A plugin can switch views only in answer to your input. The chat was never changed, and the fork's transcript stays in `/tasks`.
 - **In auto mode, a `/better`-marked Agent call is refused after the check**, because Claude Code won't run a prompt that changed after approval. The agent then resends the checked brief, which the classifier reviews, and the unchecked brief never runs. To avoid the round trip, call `check_brief` first.
-- **Each command leaves one line in the transcript** (`/better is reading ...`) that the model can read.
+- **Each command leaves one line in the transcript** (`/better is reading ...`) that the model can read. The command itself shows as `/better` without your text; the text still reaches the helper (see the run record's `input`).
 - **The helper runs the `claude` CLI.** It takes the first `claude` on PATH, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the desktop app's own engine, and names the one it used in the run record. With none, it says how to install one and starts nothing.
 - **The helper can read any file in the working folder, `.env` files included.** What it quotes from them goes into your input box and the run record (readable only by you). Run it from a folder without secrets if that matters.
 - **The helper reads only inside the working folder, and loads none of your settings files.** No allow rule, yours or the repo's, can widen what it may do, even if its guard failed to load. The cost: your settings' hooks (a secret-output hook, say) and deny rules don't run inside the helper, and it can't read files outside the folder that your chat mentions. Plugins still load.
