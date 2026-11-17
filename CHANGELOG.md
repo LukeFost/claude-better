@@ -6,7 +6,7 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ### Changed
 
-- The draft pane has one row of controls above the prompt instead of two rows and a status line: `Send to thread`, `Edit`, and the quieter `input box` and `drop`. A status line shows only when there is news ("Edited by you", or that it is sending), and while sending the buttons are hidden.
+- The draft pane's controls take two short lines above the prompt instead of four (one line when the pane is wide enough): `Send to thread` and `Edit`, then the quieter `input box` and `drop`. A status line shows only when there is news ("Edited by you", or that it is sending), and while sending the buttons are hidden.
 - In the edit view the hint and `Done` sit above the text box, so they stay on screen for a long prompt.
 - The row above the prompt for a kept prompt now says "/better's draft is waiting" with `drop`, the same words as the pane.
 - Two toasts that repeated the screen are gone: the one on opening the pane (it still shows when the new draft replaced an earlier one) and "The draft was sent to the thread".
