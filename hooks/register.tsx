@@ -3,9 +3,9 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Handover } from './better'
 
-import type { BetterBoomerang, BetterRun, BetterWaiting } from '../types'
+import type { BetterBoomerang, BetterDraft, BetterRun, BetterWaiting } from '../types'
 import {
-  BRIEF_MARK, CLI_LOGIN, FILL_TRIES, runsDir, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  BRIEF_MARK, CLI_LOGIN, DRAFT_PANE, editRows, FILL_TRIES, runsDir, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
   desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
@@ -14,6 +14,7 @@ const briefsA = atom({ plugin: 'better', key: 'briefs' } as const, 0)
 const boomA = atom({ plugin: 'better', key: 'boomerang' } as const, null as BetterBoomerang | null)
 const forksA = atom({ plugin: 'better', key: 'forks' } as const, [] as string[])
 const waitingA = atom({ plugin: 'better', key: 'waiting' } as const, null as BetterWaiting | null)
+const draftA = atom({ plugin: 'better', key: 'draft' } as const, null as BetterDraft | null)
 const tickA = atom({ plugin: 'better', key: 'tick' } as const, 0)
 
 const TOOL = 'check_brief'
@@ -232,7 +233,7 @@ async function noteHandover($: EngineInterface, log: string | undefined, handove
   } catch {}
 }
 
-async function handOver($: EngineInterface, improved: string, opts: { surface?: Surface; saveTo?: string; log?: string; note?: string; isRetry?: boolean } = {}): Promise<boolean> {
+async function handOver($: EngineInterface, improved: string, opts: { surface?: Surface; saveTo?: string; log?: string; note?: string; isRetry?: boolean; extra?: Partial<Handover> } = {}): Promise<boolean> {
   let draft = ''
   let refusal: string | undefined
   let tries = 0
@@ -243,7 +244,7 @@ async function handOver($: EngineInterface, improved: string, opts: { surface?: 
     const filled = await $.prompt.fill({ text: handOverText(improved, draft), mode: 'replace' })
     if (filled.isFilled) {
       await update($, waitingA, () => null)
-      await noteHandover($, opts.log, { result: opts.isRetry ? 'filled_later' : 'filled', tries })
+      await noteHandover($, opts.log, { result: opts.isRetry ? 'filled_later' : 'filled', tries, ...opts.extra })
       $.ui.toast(`The improved prompt is in your input box${draft.trim() ? ", above the draft you'd typed" : ''}. Edit it, then press Enter to send.${opts.note ?? ''}`, { timeoutMs: 8000 })
       return true
     }
@@ -257,7 +258,7 @@ async function handOver($: EngineInterface, improved: string, opts: { surface?: 
   const copied = await $.ui.copy({ text: improved, ...(opts.surface ? { surface: opts.surface } : {}) }).catch(() => ({ isCopied: false }))
   const path = opts.saveTo && (await $.fs.write(opts.saveTo, `${improved}\n`).then(() => opts.saveTo, () => undefined))
   await update($, waitingA, () => ({ improved, ...(path ? { path } : {}), ...(opts.log ? { log: opts.log } : {}) }))
-  await noteHandover($, opts.log, { result: 'kept', tries, ...(refusal ? { refusal } : {}), isCopied: copied.isCopied, ...(path ? { savedTo: path } : {}) })
+  await noteHandover($, opts.log, { result: 'kept', tries, ...(refusal ? { refusal } : {}), isCopied: copied.isCopied, ...(path ? { savedTo: path } : {}), ...opts.extra })
   $.ui.log(`/better's improved prompt (not sent; ${why}):\n\n${improved}`)
   const where = [copied.isCopied ? 'on your clipboard' : '', path ? `saved in ${path}` : '', 'shown in the chat'].filter(Boolean).join(', ')
   $.ui.toast(`The input box couldn't take the prompt (${why}). It is ${where}. Press "Put in input box" above the prompt, or run /better-back, to try again. Nothing was sent.${opts.note ?? ''}`, { timeoutMs: 20000 })
@@ -265,9 +266,52 @@ async function handOver($: EngineInterface, improved: string, opts: { surface?: 
 }
 
 const S: {
-  isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string>
+  isHelper: boolean; edit?: string; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string>
   spawning: number; tasks: Map<string, string | undefined>; mine: Set<string>; ended: Map<string, ForkEnd>
 } = { isHelper: false, forks: new Set(), spawning: 0, tasks: new Map(), mine: new Set(), ended: new Map() }
+
+const DRAFT_TITLE = '/better draft'
+
+async function showDraft($: EngineInterface, improved: string, opts: { saveTo?: string; log?: string; note?: string } = {}): Promise<boolean> {
+  const prior = await read($, draftA)
+  const path = opts.saveTo && (await $.fs.write(opts.saveTo, `${improved}\n`).then(() => opts.saveTo, () => undefined))
+  await update($, draftA, () => ({ text: improved, isEditing: false, ...(path ? { path } : {}), ...(opts.log ? { log: opts.log } : {}) }))
+  const opened = await $.ui.open({ id: DRAFT_PANE, title: DRAFT_TITLE }).catch(() => ({ isPlaced: false as const }))
+  if (!opened.isPlaced) {
+    await update($, draftA, () => prior)
+    if (!prior) await $.ui.close({ id: DRAFT_PANE }).catch(() => {})
+    return false
+  }
+  S.edit = undefined
+  await noteHandover($, opts.log, { result: 'pane', tries: 0, ...(path ? { savedTo: path } : {}) })
+  const replaced = prior ? ` It replaced an earlier draft${prior.path ? `, which is saved in ${prior.path}` : ''}.` : ''
+  $.ui.toast(`The improved prompt is in the ${DRAFT_TITLE} pane. Edit it there, then press "Send to thread". Nothing is sent until you do.${replaced}${opts.note ?? ''}`, { timeoutMs: 10000 })
+  return true
+}
+
+async function saveEdit($: EngineInterface, value: string | undefined): Promise<void> {
+  await update($, draftA, (d) => (d ? { ...d, isEditing: false, ...(value !== undefined && value !== d.text ? { text: value, isEdited: true } : {}) } : d))
+  S.edit = undefined
+}
+
+async function endDraft($: EngineInterface, how: 'sent' | 'box' | 'dropped', surface?: Surface): Promise<void> {
+  const draft = await read($, draftA)
+  if (!draft) return
+  const text = draft.isEditing ? S.edit ?? draft.text : draft.text
+  const isEdited = draft.isEdited === true || text !== draft.text
+  const done = { viaPane: true, ...(isEdited ? { isEdited } : {}) }
+  if (how === 'sent') {
+    if (!text.trim()) return void $.ui.toast('The draft is empty, so nothing was sent.')
+    const sent = await $.prompt.submit({ text, asUser: true }).catch((e) => ({ drop: (e as Error).message }))
+    if (sent.drop !== undefined) return void $.ui.toast(`Couldn't send the draft (${sent.drop}). It stays in the pane; nothing was sent.`, { timeoutMs: 10000 })
+  }
+  await update($, draftA, () => null)
+  S.edit = undefined
+  await $.ui.close({ id: DRAFT_PANE }).catch(() => {})
+  if (how === 'box') return void (await handOver($, text, { surface, log: draft.log, saveTo: draft.path, extra: done }))
+  await noteHandover($, draft.log, { result: how, tries: 0, ...done })
+  $.ui.toast(how === 'sent' ? 'The draft was sent to the thread.' : `The draft was dropped; nothing was sent.${draft.path ? ` A copy is in ${draft.path}.` : ''}`, { timeoutMs: 8000 })
+}
 
 function startTicker($: EngineInterface): void {
   S.ticker ??= $.clock.every(1000, () => void update($, tickA, (n) => (n ?? 0) + 1))
@@ -281,6 +325,16 @@ async function stopTickerIfIdle($: EngineInterface): Promise<void> {
 
 async function back($: EngineInterface, surface?: Surface): Promise<string | undefined> {
   const boom = await read($, boomA)
+  const draft = boom?.improved ? null : await read($, draftA)
+  if (draft) {
+    const opened = await $.ui.open({ id: DRAFT_PANE, title: DRAFT_TITLE, focus: true }).catch(() => ({ isPlaced: false as const }))
+    if (opened.isPlaced) {
+      await update($, draftA, (d) => (d ? { ...d, isHidden: false } : d))
+      return `The ${DRAFT_TITLE} pane is open.`
+    }
+    await endDraft($, 'box', surface)
+    return (await read($, waitingA)) ? "The input box couldn't take the prompt; it is kept for you, see the note above the prompt. Nothing was sent." : undefined
+  }
   if (!boom?.improved) {
     const waiting = await read($, waitingA)
     if (!waiting) return 'No /better prompt is waiting.'
@@ -381,7 +435,9 @@ export const register: Register = (on) => {
             void update($, runA, (v) => (v ? { ...v, stage, label, tools: r.tools.map((t) => ({ ...t })) } : v))
           },
         })
-        if (out.ok) await handOver($, out.checked, { surface, saveTo: promptFile(out.log), log: out.log, note: out.refused ? ` The helper was refused ${out.refused === 1 ? '1 read' : `${out.refused} reads`}, most often for a path outside its folders; the run record lists them.` : '' })
+        const note = out.ok && out.refused ? ` The helper was refused ${out.refused === 1 ? '1 read' : `${out.refused} reads`}, most often for a path outside its folders; the run record lists them.` : ''
+        if (out.ok && surface === 'desktop' && (await showDraft($, out.checked, { saveTo: promptFile(out.log), log: out.log, note }))) return
+        if (out.ok) await handOver($, out.checked, { surface, saveTo: promptFile(out.log), log: out.log, note })
         else if (out.cancelled) $.ui.toast('/better cancelled; nothing was sent')
         else $.ui.toast(`/better failed: ${out.error}`, { timeoutMs: 15000 })
       } catch (err) {
@@ -481,7 +537,9 @@ export const register: Register = (on) => {
     const briefs = await read($, briefsA)
     const boom = await read($, boomA)
     const waiting = await read($, waitingA)
-    if (!run && !briefs && !boom && !waiting) return next(e)
+    const draft = await read($, draftA)
+    const hidden = draft?.isHidden ? draft : null
+    if (!run && !briefs && !boom && !waiting && !hidden) return next(e)
     await read($, tickA)
     const now = Date.now()
     const width = Math.max(30, e.props.bodyColumns ?? 80)
@@ -538,6 +596,56 @@ export const register: Register = (on) => {
         </Box>,
       )
     }
+    if (hidden) {
+      rows.push(
+        <Box key="draft">
+          <Text color="claude">/better's draft is waiting  </Text>
+          <Button key="show" variant="primary" label="Show draft" onPress={async () => {
+            const said = await back($, e.surface)
+            if (said && !/pane is open/.test(said)) $.ui.toast(said)
+          }} />
+        </Box>,
+      )
+    }
     return <Box flexDirection="column">{rows}</Box>
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === DRAFT_PANE && e.origin.kind === 'person') await update($, draftA, (d) => (d ? { ...d, isHidden: true } : d))
+    return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: DRAFT_PANE }, async ($, e) => {
+    const { Box, Text, Button, Input, Markdown } = $.ui.resolve(e)
+    const draft = await read($, draftA)
+    if (!draft) return <Text dimColor>No /better draft is open. Run /better to make one.</Text>
+    if (draft.isEditing) {
+      return (
+        <Box flexDirection="column">
+          <Input key="edit" rows={editRows(draft.text)} value={S.edit ?? draft.text} submitLabel="save" onInput={(value) => void (S.edit = value)} onSubmit={(value) => saveEdit($, value)} />
+          <Text dimColor>Enter saves your edit. Shift+Enter adds a line. Nothing is sent from here.</Text>
+          <Box>
+            <Button key="done" variant="primary" label="Done" onPress={() => saveEdit($, S.edit)} />
+            <Text>  </Text>
+            <Button key="undo" plain label="discard edit" onPress={() => saveEdit($, undefined)} />
+          </Box>
+        </Box>
+      )
+    }
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Button key="send" variant="primary" label="Send to thread" onPress={() => endDraft($, 'sent', e.surface)} />
+          <Text>  </Text>
+          <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
+          <Text>  </Text>
+          <Button key="box" label="Put in input box" onPress={() => endDraft($, 'box', e.surface)} />
+          <Text>  </Text>
+          <Button key="drop" plain label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
+        </Box>
+        <Text dimColor>{draft.isEdited ? 'Edited by you. ' : ''}Nothing is sent until you press "Send to thread".</Text>
+        <Markdown text={draft.text} />
+      </Box>
+    )
   })
 }

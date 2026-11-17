@@ -38,6 +38,7 @@ While it works, a two-row strip (the *band*) above the input box shows what the 
 |---|---|
 | Deepen a prompt | `/better <prompt>` |
 | Deepen the task in progress, including your feedback so far | `/better` |
+| Review, edit and send the result (desktop app) | the "/better draft" pane: `Send to thread`, `Edit`, `Put in input box`, `drop` |
 | Stop it | `/better-cancel`, or press `cancel` in the band (click it in the desktop app; in the terminal, ctrl+x tab, then Enter) |
 | Watch the research live, then come back | `/better-boomerang [prompt]`, then `Back with prompt` in the band or `/better-back`. Not in auto mode. |
 | An agent checks a brief before a new thread or subagent | the `mcp__better__check_brief` tool, or an Agent prompt that starts with `/better ` |
@@ -105,6 +106,7 @@ How it differs from the Claude Code plugin:
 - **In the desktop app the fork can't be watched in the main view.** It runs in the background, and `Back with prompt` or `/better-back` puts its prompt in your input box.
 - **On a desktop session's first message, the app may say "/better isn't a command here."** The app checks the command before the session has loaded the plugin; the command still runs. Later messages don't show it.
 - **Desktop toasts stay until you close them or the next one replaces it.**
+- **The draft pane is desktop only.** In the desktop app the improved prompt opens in a pane beside the chat, and only `Send to thread` submits it. The edit box is plain text: the formatted view is read-only, and Enter saves the edit while Shift+Enter adds a line. One draft is held at a time; a second `/better` replaces it, and the earlier one stays in its `.md` file. In the terminal the prompt goes in the input box as before.
 - **If you leave the session while `/better` runs, the box can't take the prompt.** The desktop app only fills the box of a session that is on screen (the engine reports `no_composer`), and its clipboard is out of reach then too. `/better` tries for about 5 seconds, then saves the whole prompt as a `.md` file in `~/.claude/better/runs` (the toast has the full path), shows it in the chat, and keeps it. Back in the session, press `Put in input box` above the prompt or run `/better-back`. The same happens while a dialog is open over the box.
 - **While a turn is running, Claude Code queues `/better`**, and it starts when the turn ends. Once it is running you can keep working; it is never blocked.
 - **The return from boomerang is one press, not automatic.** A plugin can switch views only in answer to your input. The chat was never changed, and the fork's transcript stays in `/tasks`.
@@ -121,7 +123,7 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 53 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 60 tests; the flows run on the terminal and desktop surfaces
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types

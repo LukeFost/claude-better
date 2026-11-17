@@ -121,7 +121,12 @@ export function runsDir(home: string, pluginRoot: string, override?: string): st
   return `${home}/.claude/better/${/[\\/]plugins[\\/]cache[\\/]/.test(pluginRoot) ? 'runs' : 'runs-dev'}`
 }
 
-export type Handover = { result: 'filled' | 'filled_later' | 'kept'; tries: number; refusal?: string; isCopied?: boolean; savedTo?: string }
+export type Handover = {
+  result: 'filled' | 'filled_later' | 'kept' | 'pane' | 'sent' | 'dropped'
+  tries: number; refusal?: string; isCopied?: boolean; savedTo?: string; viaPane?: boolean; isEdited?: boolean
+}
+export const DRAFT_PANE = 'better-draft'
+export const editRows = (text: string) => Math.min(30, Math.max(8, text.split('\n').length + 2))
 
 export const promptFile = (log: string) => log.replace(/\.json$/, '.md')
 

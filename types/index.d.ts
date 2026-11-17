@@ -16,6 +16,8 @@ export type BetterBoomerang = {
   isViewed?: boolean
 }
 
+export type BetterDraft = { text: string; isEditing: boolean; isEdited?: boolean; isHidden?: boolean; path?: string; log?: string }
+
 export type BetterWaiting = { improved: string; path?: string; log?: string }
 
 declare module 'claude-code' {
@@ -27,6 +29,7 @@ declare module 'claude-code' {
       tick: number
       forks: string[]
       waiting: BetterWaiting | null
+      draft: BetterDraft | null
     }
   }
 }

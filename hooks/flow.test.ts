@@ -19,7 +19,7 @@ type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
   forkAnswer?: string | string[]; forkReason?: 'answer' | 'error'
-  fills?: ('no_composer' | 'dialog' | 'ok')[]; isCopied?: boolean; messages?: any[]
+  fills?: ('no_composer' | 'dialog' | 'ok')[]; isCopied?: boolean; messages?: any[]; hasPane?: boolean; submitDrop?: string
 }
 
 const loginError = (text: string) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: text }) + '\n'
@@ -30,9 +30,9 @@ function world(on: any, opts: Opts) {
   const at = { surface: 'terminal' as Surface }
   const seen = {
     clock, at, engine: undefined as any, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[],
-    writes: [] as string[], logs: [] as string[], copies: [] as string[], fillTries: 0, written: new Map<string, string>(), views: [] as any[], forked: [] as any[], ran: [] as any[], pending: [] as (() => Promise<unknown>)[], reset() {
+    writes: [] as string[], opened: [] as any[], closed: [] as string[], submitted: [] as any[], logs: [] as string[], copies: [] as string[], fillTries: 0, written: new Map<string, string>(), views: [] as any[], forked: [] as any[], ran: [] as any[], pending: [] as (() => Promise<unknown>)[], reset() {
       seen.fillTries = 0
-      for (const k of ['logs', 'copies', 'spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views', 'forked', 'ran', 'pending'] as const) seen[k].length = 0
+      for (const k of ['opened', 'closed', 'submitted', 'logs', 'copies', 'spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views', 'forked', 'ran', 'pending'] as const) seen[k].length = 0
     },
   }
   const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
@@ -76,6 +76,9 @@ function world(on: any, opts: Opts) {
     return { isFilled: false, refusal: how }
   })
   on('ui.copy', (_: any, e: any) => (seen.copies.push(e.text), { value: opts.isCopied ? { isCopied: true } : { isCopied: false, reason: 'no-clipboard' } }))
+  on('ui.open', (_: any, e: any) => (seen.opened.push(e), { value: opts.hasPane && at.surface === 'desktop' ? { isPlaced: true } : { isPlaced: false, reason: 'no-surface' } }))
+  on('ui.close', (_: any, e: any) => (seen.closed.push(e.id), { value: undefined }))
+  on('prompt.submit', (_: any, e: any) => (opts.submitDrop ? { drop: opts.submitDrop } : (seen.submitted.push(e), { text: e.text })))
   on('ui.log', (_: any, e: any) => (seen.logs.push(e.text), { value: undefined }))
   on('session.messages', () => ({ value: opts.messages ?? [] }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
@@ -532,4 +535,129 @@ test('a copy that is not the installed one keeps its records in runs-dev, away f
     expect(seen.writes.filter((p) => p.endsWith('.json')).every((p) => p.startsWith('/home/me/.claude/better/runs-dev/'))).toBe(true)
     expect(lastRecord(seen).handover).toEqual({ result: 'filled', tries: 1 })
   })
+})
+
+const PANE = {
+  plugin: 'better', component: 'Pane', requestId: 'better-draft', surface: 'desktop',
+  props: { title: '/better draft', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+} as any
+
+async function draftOnDesktop($: any, seen: ReturnType<typeof world>) {
+  seen.engine = $
+  seen.at.surface = 'desktop'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  await $.command.run({ command: 'better', args: 'x' } as any)
+  await seen.clock.settle()
+}
+
+test('on desktop the improved prompt opens in a draft pane, saved beside its record, and nothing is filled or sent', async ($, on) => {
+  const seen = world(on, { helperOut: reply('# Deeper prompt\n\n- one'), hasPane: true })
+  await draftOnDesktop($, seen)
+  expect(seen.opened).toEqual([{ id: 'better-draft', title: '/better draft' }])
+  expect(seen.filled).toEqual([])
+  expect(seen.submitted).toEqual([])
+  const md = seen.writes.find((p) => p.endsWith('.md'))!
+  expect(seen.written.get(md)).toBe('# Deeper prompt\n\n- one\n')
+  expect(lastRecord(seen).handover).toEqual({ result: 'pane', tries: 0, savedTo: md })
+  expect(seen.toasts.at(-1)).toContain('Nothing is sent until you do')
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('# Deeper prompt\n\n- one')
+  expect(await ui.find({ type: 'Button', key: 'send' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a pane that cannot be placed, or a terminal, falls back to the input box', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.') })
+  await eachSurface($, seen, async (surface) => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.filled).toEqual(['Deeper prompt.'])
+    expect(seen.opened).toHaveLength(surface === 'desktop' ? 1 : 0)
+    expect(seen.closed).toEqual(surface === 'desktop' ? ['better-draft'] : [])
+    expect(lastRecord(seen).handover).toEqual({ result: 'filled', tries: 1 })
+  })
+})
+
+test('Edit shows the prompt in a text box; Enter saves the edit without sending, and Send to thread submits the edited text once', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true })
+  await draftOnDesktop($, seen)
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'edit-it' })
+  expect((await ui.find({ type: 'Input', key: 'edit' }))?.props.value).toBe('Deeper prompt.')
+  expect(await ui.find({ type: 'Text', text: /Shift\+Enter adds a line/ })).toBeDefined()
+  await ui.input({ key: 'edit', text: 'Deeper prompt.\n\nMy line.', kind: 'change' })
+  expect(seen.submitted).toEqual([])
+  await ui.input({ key: 'edit', text: 'Deeper prompt.\n\nMy line.', kind: 'submit' })
+  expect(seen.submitted).toEqual([])
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('Deeper prompt.\n\nMy line.')
+  expect(await ui.find({ type: 'Text', text: /Edited by you/ })).toBeDefined()
+  await ui.press({ key: 'send' })
+  expect(seen.submitted.map((e) => [e.text, e.origin?.asUser])).toEqual([['Deeper prompt.\n\nMy line.', true]])
+  expect(seen.closed).toEqual(['better-draft'])
+  expect(lastRecord(seen).handover).toEqual({ result: 'sent', tries: 0, viaPane: true, isEdited: true })
+  expect(seen.toasts.at(-1)).toContain('sent to the thread')
+  await ui.press({ key: 'send' }).catch(() => {})
+  expect(seen.submitted).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('Done keeps what was typed, and discard edit drops it', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true })
+  await draftOnDesktop($, seen)
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'edit-it' })
+  await ui.input({ key: 'edit', text: 'Thrown away.', kind: 'change' })
+  await ui.press({ key: 'undo' })
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('Deeper prompt.')
+  await ui.press({ key: 'edit-it' })
+  await ui.input({ key: 'edit', text: 'Kept.', kind: 'change' })
+  await ui.press({ key: 'done' })
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('Kept.')
+  expect(seen.submitted).toEqual([])
+  await ui.unmount()
+})
+
+test('a refused send keeps the draft in the pane and says nothing was sent', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true, submitDrop: 'a Stop stands' })
+  await draftOnDesktop($, seen)
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'send' })
+  expect(seen.toasts.at(-1)).toContain('a Stop stands')
+  expect(seen.toasts.at(-1)).toContain('nothing was sent')
+  expect(seen.closed).toEqual([])
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('Deeper prompt.')
+  await ui.unmount()
+})
+
+test('Put in input box and drop both close the pane; neither sends', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true })
+  await draftOnDesktop($, seen)
+  let ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'box' })
+  expect(seen.filled).toEqual(['Deeper prompt.'])
+  expect(lastRecord(seen).handover).toEqual({ result: 'filled', tries: 1, viaPane: true })
+  await ui.unmount()
+  await $.command.run({ command: 'better', args: 'y' } as any)
+  await seen.clock.settle()
+  ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'drop' })
+  expect(lastRecord(seen).handover).toEqual({ result: 'dropped', tries: 0, viaPane: true })
+  expect(seen.toasts.at(-1)).toContain('nothing was sent')
+  expect(seen.closed).toEqual(['better-draft', 'better-draft'])
+  expect(seen.submitted).toEqual([])
+  expect((await ui.find({ type: 'Text', text: /No \/better draft/ }))).toBeDefined()
+  await ui.unmount()
+})
+
+test('/better-back reopens the draft pane with the draft still in it, and sends nothing', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), hasPane: true })
+  await draftOnDesktop($, seen)
+  const said = await $.command.run({ command: 'better-back', args: '' } as any)
+  expect(said.text).toContain('pane is open')
+  expect(seen.opened.at(-1)).toEqual({ id: 'better-draft', title: '/better draft', focus: true })
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ type: 'Markdown' }))?.text).toBe('Deeper prompt.')
+  expect(seen.submitted).toEqual([])
+  expect(seen.filled).toEqual([])
+  await ui.unmount()
 })

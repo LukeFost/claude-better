@@ -4,6 +4,16 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+### Added
+
+- In the desktop app, `/better` now opens its improved prompt in a pane beside the chat, "/better draft", instead of filling the input box. The pane shows the prompt as formatted text with four buttons: `Send to thread` submits it as your next message, `Edit` swaps it for a text box (Enter saves the edit, Shift+Enter adds a line), `Put in input box` does what `/better` did before, and `drop` discards it. Nothing is sent until you press `Send to thread`.
+- The draft is also saved as a `.md` file beside its run record. If you close the pane, a `Show draft` button above the prompt, or `/better-back`, opens it again.
+- Run records gain three `handover` results: `pane` (shown in the pane), `sent` and `dropped`, plus `viaPane` and `isEdited` on whatever the pane did.
+
+### Changed
+
+- The terminal, and a desktop session that is not on screen, keep the old behaviour: the prompt goes in the input box, or is kept as in 0.4.8.
+
 ## [0.4.9] - 2026-11-17
 
 ### Added
