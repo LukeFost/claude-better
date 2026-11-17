@@ -302,7 +302,10 @@ async function endDraft($: EngineInterface, how: 'sent' | 'box' | 'dropped', sur
   const done = { viaPane: true, ...(isEdited ? { isEdited } : {}) }
   if (how === 'sent') {
     if (!text.trim()) return void $.ui.toast('The draft is empty, so nothing was sent.')
+    if (draft.isSending) return
+    await update($, draftA, (d) => (d ? { ...d, isSending: true } : d))
     const sent = await $.prompt.submit({ text, asUser: true }).catch((e) => ({ drop: (e as Error).message }))
+    if (sent.drop !== undefined) await update($, draftA, (d) => (d ? { ...d, isSending: false } : d))
     if (sent.drop !== undefined) return void $.ui.toast(`Couldn't send the draft (${sent.drop}). It stays in the pane; nothing was sent.`, { timeoutMs: 10000 })
   }
   await update($, draftA, () => null)
@@ -635,15 +638,16 @@ export const register: Register = (on) => {
     return (
       <Box flexDirection="column">
         <Box>
-          <Button key="send" variant="primary" label="Send to thread" onPress={() => endDraft($, 'sent', e.surface)} />
+          <Button key="send" variant="primary" label="Send to thread" onPress={() => void endDraft($, 'sent', e.surface).catch((err) => $.ui.toast(`Couldn't send the draft: ${(err as Error).message}`))} />
           <Text>  </Text>
           <Button key="edit-it" label="Edit" onPress={() => update($, draftA, (d) => (d ? { ...d, isEditing: true } : d))} />
-          <Text>  </Text>
+        </Box>
+        <Box>
           <Button key="box" label="Put in input box" onPress={() => endDraft($, 'box', e.surface)} />
           <Text>  </Text>
           <Button key="drop" plain label="drop" onPress={() => endDraft($, 'dropped', e.surface)} />
         </Box>
-        <Text dimColor>{draft.isEdited ? 'Edited by you. ' : ''}Nothing is sent until you press "Send to thread".</Text>
+        <Text dimColor>{draft.isSending ? 'Sending. If Claude is busy, it goes when the running turn ends.' : `${draft.isEdited ? 'Edited by you. ' : ''}Nothing is sent until you press "Send to thread".`}</Text>
         <Markdown text={draft.text} />
       </Box>
     )
