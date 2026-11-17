@@ -15,10 +15,10 @@ const reply = (body: string) =>
 
 const EXPIRED = JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' }) + '\n'
 
-function world(on: any, opts: { helperOut?: string; isGuardless?: boolean } = {}) {
+function world(on: any, opts: { helperOut?: string; isGuardless?: boolean; env?: Record<string, string> } = {}) {
   const clock = mock.clock(on)
   const seen = { clock, commands: [] as string[], tools: [] as string[], spawned: [] as any[], forked: [] as any[], filled: [] as string[], toasts: [] as string[], written: new Map<string, string>() }
-  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', CLAUDE_BETTER_RUNS_DIR: '/home/me/.claude/better/runs' })
+  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', CLAUDE_BETTER_RUNS_DIR: '/home/me/.claude/better/runs', ...opts.env })
   on('command.register', (_: any, e: any) => (seen.commands.push(e.name), { value: {} }))
   on('tool.register', (_: any, e: any) => (seen.tools.push(e.name), { value: {} }))
   on('agent.spawn', (_: any, e: any) => (seen.forked.push(e), { deny: 'no fork in this test' }))
@@ -91,4 +91,11 @@ test('an expired CLI login starts no fork of the session: the error names the co
   expect(seen.forked).toEqual([])
   expect(seen.filled).toEqual([])
   expect(seen.toasts.some((t) => t.includes('claude auth login') && t.includes('OAuth session expired'))).toBe(true)
+})
+
+test("loaded inside the helper, this plugin writes no guard proof: only the guard module may vouch for the guard", async ($, on) => {
+  const seen = world(on, { env: { CLAUDE_BETTER_HELPER: '1', CLAUDE_BETTER_GUARD_FILE: '/home/me/.claude/better/runs/r.json' } })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+  expect([...seen.written.keys()]).toEqual([])
+  expect(seen.commands).toEqual([])
 })

@@ -150,9 +150,9 @@ claude plugin test .     # 61 tests; the flows run on the terminal and desktop s
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
-node scripts/build-code-mode.mjs            # rebuild code-mode/ after any change under hooks/ or types/
+node scripts/build-code-mode.mjs            # rebuild code-mode/ after any change under hooks/, types/ or plugin.json (bump code-mode/guard's version by hand)
 node --test scripts/*.node-test.mjs         # fails when code-mode/ is out of date or still hooks tool calls
-node scripts/test-code-mode.mjs             # 6 tests: better-code-mode and its guard, each against its own plugin
+node scripts/test-code-mode.mjs             # 7 tests: better-code-mode and its guard, each against its own plugin
 ```
 
 ## Remove

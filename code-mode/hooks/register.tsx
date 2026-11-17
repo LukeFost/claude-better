@@ -304,14 +304,12 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     S.isHelper = (await $.env.get('CLAUDE_BETTER_HELPER')) === '1'
     if (S.isHelper) {
-      const proof = await $.env.get('CLAUDE_BETTER_GUARD_FILE')
-      if (proof) await $.fs.write(proof, JSON.stringify({ isGuardLoaded: true }))
       return next(e)
     }
     const started = await next(e)
     await $.command.register({ name: 'better', description: 'Deepen a prompt (or the current task) with a read-only helper in the background, then put the improved prompt in your input box', argumentHint: '[prompt]' })
     await $.command.register({ name: 'better-cancel', description: 'Stop the /better helper that is running; nothing is sent' })
-    await $.command.register({ name: 'better-back', description: 'Put a waiting /better or /better-boomerang prompt in your input box' })
+    await $.command.register({ name: 'better-back', description: 'Put a waiting /better prompt in your input box' })
     return started
   })
 

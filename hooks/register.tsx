@@ -399,8 +399,10 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     S.isHelper = (await $.env.get('CLAUDE_BETTER_HELPER')) === '1'
     if (S.isHelper) {
+      // full-only:start
       const proof = await $.env.get('CLAUDE_BETTER_GUARD_FILE')
       if (proof) await $.fs.write(proof, JSON.stringify({ isGuardLoaded: true }))
+      // full-only:end
       return next(e)
     }
     const started = await next(e)
@@ -409,7 +411,10 @@ export const register: Register = (on) => {
     // full-only:start
     await $.command.register({ name: 'better-boomerang', description: 'Watch a read-only fork of this chat deepen a prompt (or the current task), then come back with it in your input box', argumentHint: '[prompt]' })
     // full-only:end
+    // full-only:start
     await $.command.register({ name: 'better-back', description: 'Put a waiting /better or /better-boomerang prompt in your input box' })
+    // full-only:end
+    // code-mode: await $.command.register({ name: 'better-back', description: 'Put a waiting /better prompt in your input box' })
     // full-only:start
     await $.tool.register({
       name: TOOL,

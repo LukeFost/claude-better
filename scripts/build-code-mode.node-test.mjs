@@ -21,6 +21,15 @@ test('the copy has none of the hooks Code Mode refuses, and the full plugin stil
   assert.match(readFileSync(join(root, 'hooks/register.tsx'), 'utf8'), REFUSED_HOOKS)
 })
 
+test('a refused event name is caught however the hook is written', () => {
+  for (const line of ["on('tool.check', f)", 'on(\n  "tool.call", f)', 'on(`tool.run`, f)', "hook<'tool.judge'>('tool.judge', f)", "const EV = 'agent.spawn'", "on(/* x */ 'classic.PreToolUse', f)"]) assert.match(line, REFUSED_HOOKS)
+  for (const line of ["on('session.start', f)", "on('command.run', { command: 'better' }, f)", '$.tool.check({ tool })']) assert.doesNotMatch(line, REFUSED_HOOKS)
+})
+
+test("the copy's own module never writes the guard proof", () => {
+  assert.doesNotMatch(build()['code-mode/hooks/register.tsx'], /isGuardLoaded: true|CLAUDE_BETTER_GUARD_FILE/)
+})
+
 test('the copy and the full plugin carry the same version', () => {
   const full = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'))
   const copy = JSON.parse(build()['code-mode/.claude-plugin/plugin.json'])
