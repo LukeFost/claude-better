@@ -1,6 +1,6 @@
 {
   "name": "better",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "pi-better for Claude Code: /better and /better-boomerang deepen a prompt with a read-only helper and put it in your input box; agents check a subagent brief before it starts.",
   "types": "./types/index.d.ts",
   "license": "MIT",

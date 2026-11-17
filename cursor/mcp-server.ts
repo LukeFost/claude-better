@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
+import { randomUUID } from 'node:crypto'
 import { PLUGIN_ROOT, runHelper } from './helper.ts'
 import { isInside, outsideFolder } from '../hooks/better.ts'
 import { linkRefusal } from './link.ts'
@@ -46,7 +47,21 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'better_wait',
+    description: 'Wait for a `better` or `check_brief` run that said it is still running, and return its result. Call it again each time it says the run is still going.',
+    inputSchema: {
+      type: 'object',
+      properties: { job: { type: 'string', description: 'The job id the earlier call gave.' } },
+      required: ['job'],
+      additionalProperties: false,
+    },
+  },
 ]
+
+const WAIT_MS = Number(process.env.BETTER_MCP_WAIT_MS) || 45_000
+type Job = { result: Promise<unknown>; stop: AbortController; progressToken: unknown; isBrief: boolean }
+const jobs = new Map<string, Job>()
 
 const send = (msg: unknown) => process.stdout.write(`${JSON.stringify(msg)}\n`)
 const calls = new Map<string | number, AbortController>()
@@ -102,6 +117,13 @@ function openInNewChat(text: string): { opened: true } | { opened: false; why?: 
 }
 
 async function call(id: string | number, name: string, args: any, progressToken: unknown): Promise<unknown> {
+  if (name === 'better_wait') {
+    const key = String(args?.job ?? '')
+    const job = jobs.get(key)
+    if (!job) return { isError: true, content: [{ type: 'text', text: `There is no /better job ${key || '(none given)'}: it already returned, or the server restarted. Run /better again.` }] }
+    job.progressToken = progressToken
+    return answer(id, key, job)
+  }
   const isBrief = name === 'check_brief'
   const body = String((isBrief ? args?.brief : args?.prompt) ?? '').replace(/^\/better(\s|$)/, '').trim()
   if (supportsRoots) await askRoots()
@@ -110,14 +132,38 @@ async function call(id: string | number, name: string, args: any, progressToken:
   const cwd = where.cwd
   if (!body) return { isError: true, content: [{ type: 'text', text: isBrief ? 'check_brief needs the brief.' : 'better needs the prompt (or the task in progress).' }] }
   const context = typeof args?.context === 'string' && args.context.trim() ? `\n\n## What this chat established\n\n${args.context.trim()}` : ''
-  const stop = new AbortController()
-  calls.set(id, stop)
+  const key = randomUUID().slice(0, 8)
+  const job: Job = { result: Promise.resolve(), stop: new AbortController(), progressToken, isBrief }
+  job.result = run(job, isBrief, body + context, cwd).catch((e: Error) => ({ isError: true, content: [{ type: 'text', text: `/better failed: ${e.message}` }] })).finally(() => setTimeout(() => jobs.delete(key), 10 * 60 * 1000).unref())
+  jobs.set(key, job)
+  return answer(id, key, job)
+}
+
+async function answer(id: string | number, key: string, job: Job): Promise<unknown> {
+  calls.set(id, job.stop)
+  try {
+    if (isCursorApp()) return await job.result
+    let timer: NodeJS.Timeout | undefined
+    const late = new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), WAIT_MS)))
+    const out = await Promise.race([job.result, late])
+    clearTimeout(timer)
+    if (out !== undefined) return (jobs.delete(key), out)
+    const wait = job.isBrief ? "Don't start the subagent until it returns the checked brief." : "Don't start the task meanwhile."
+    return { content: [{ type: 'text', text: `/better is still reading (job ${key}); a run takes 1 to 3 minutes. Call better_wait with job "${key}" now, and keep calling it each time it says this, however many times, until it returns the result or an error. This is not a loop to break: the user is waiting for the result. ${wait}` }] }
+  } finally {
+    calls.delete(id)
+  }
+}
+
+async function run(job: Job, isBrief: boolean, input: string, cwd: string): Promise<unknown> {
+  const stop = job.stop
   const since = Date.now()
   const watch = setInterval(() => stoppedSince(cwd, since) && stop.abort(), 500)
   try {
     const out = await runHelper({
-      kind: isBrief ? 'brief' : 'better', input: body + context, cwd, signal: stop.signal,
+      kind: isBrief ? 'brief' : 'better', input, cwd, signal: stop.signal,
       onStage: (progress, total, message) => {
+        const progressToken = job.progressToken
         if (progressToken !== undefined) send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken, progress, total, message } })
       },
     })
@@ -136,7 +182,6 @@ async function call(id: string | number, name: string, args: any, progressToken:
     return { content: [{ type: 'text', text: `${said} Show it to the user once and stop; do not carry it out.\n\n<improved-prompt>\n${out.text}\n</improved-prompt>` }] }
   } finally {
     clearInterval(watch)
-    calls.delete(id)
   }
 }
 

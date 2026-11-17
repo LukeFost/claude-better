@@ -1,0 +1,32 @@
+# Changelog
+
+Notable changes to this plugin are recorded here. Versions before 0.4.2 are in the git history only.
+
+## [Unreleased]
+
+## [0.4.3] - 2026-11-16
+
+### Fixed
+
+- Cursor: `/better` in `cursor-agent` no longer fails with "MCP error -32001: Request timed out" when the helper takes over a minute. A run longer than 45 seconds returns a job id, and the new `better_wait` tool returns the result.
+
+### Changed
+
+- README: requirements, where to start `claude`, what the band is, a "When it helps and when it doesn't" section from an A/B test ([`docs/ab-test.md`](docs/ab-test.md)), and the full example run ([`docs/example-run.md`](docs/example-run.md)).
+
+## [0.4.2] - 2026-11-16
+
+### Fixed
+
+- When the helper's model call fails, the message shows the model's error instead of "exited with code 1".
+- A band chip for a compound command shows the first command and "(+N more)", and a failed tool keeps why it failed in the run record.
+- `2>&1`, `>&2` and `&>` are no longer read as command separators in tool labels.
+
+### Changed
+
+- Run records in `~/.claude/better/runs` are capped at the newest 200.
+- Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
+
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.3
+[0.4.2]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.2
