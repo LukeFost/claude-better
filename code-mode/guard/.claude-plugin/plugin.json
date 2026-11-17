@@ -1,0 +1,10 @@
+{
+  "name": "better-guard",
+  "version": "0.5.1",
+  "description": "The read-only guard that better-code-mode loads into its own helper process. Not for installing on its own.",
+  "license": "MIT",
+  "author": {
+    "name": "Luke Foster",
+    "url": "https://github.com/LukeFost"
+  }
+}

@@ -12,13 +12,17 @@ import {
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
 const briefsA = atom({ plugin: 'better', key: 'briefs' } as const, 0)
 const boomA = atom({ plugin: 'better', key: 'boomerang' } as const, null as BetterBoomerang | null)
+// full-only:start
 const forksA = atom({ plugin: 'better', key: 'forks' } as const, [] as string[])
+// full-only:end
 const waitingA = atom({ plugin: 'better', key: 'waiting' } as const, null as BetterWaiting | null)
 const draftA = atom({ plugin: 'better', key: 'draft' } as const, null as BetterDraft | null)
 const tickA = atom({ plugin: 'better', key: 'tick' } as const, 0)
 
+// full-only:start
 const TOOL = 'check_brief'
 const TOOL_NAME = `mcp__better__${TOOL}`
+// full-only:end
 
 type Outcome =
   | { ok: true; checked: string; log: string; refused: number }
@@ -70,6 +74,7 @@ async function readDirs($: EngineInterface, input: string, cwd: string, home: st
 
 type ForkEnd = { reason: string; answer: string }
 
+// full-only:start
 async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ agentId?: string; reply?: string; checked?: string; error?: string; cancelled?: boolean; isUnmarked?: boolean }> {
   if (req.signal.aborted) return { error: 'cancelled', cancelled: true }
   S.spawning++
@@ -112,6 +117,7 @@ async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ a
     S.ended.delete(agentId)
   }
 }
+// full-only:end
 
 async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcome> {
   const home = (await $.env.get('HOME')) ?? ''
@@ -124,7 +130,10 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const model = await $.session.model()
   const claude = await findClaude($, home)
   const addDirs = req.kind === 'better' ? await readDirs($, req.input, cwd, home).catch(() => [] as string[]) : []
+  // full-only:start
   const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: $.plugin.root, addDirs })
+  // full-only:end
+  // code-mode: const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: `${$.plugin.root}/guard`, addDirs })
   const reader = new StreamReader(cwd, home)
   const stop = new AbortController()
   const onAbort = () => stop.abort(req.signal.reason ?? 'cancelled')
@@ -182,10 +191,17 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const isGuarded = await $.fs.read(log).then((t) => JSON.parse(t)?.isGuardLoaded === true).catch(() => false)
   if (exit && !isGuarded && !error) {
     checked = undefined
+    // full-only:start
     error = `The helper's read-only guard didn't load, so its result was not used. Check that ${$.plugin.root}/hooks/register.tsx loads (claude plugin validate), then try again.`
+    // full-only:end
+    // code-mode: error = `The helper's read-only guard didn't load, so its result was not used. Check that ${$.plugin.root}/guard/hooks/register.ts loads (claude plugin validate ${$.plugin.root}/guard), then try again.`
   }
+  // full-only:start
   let inSession: Awaited<ReturnType<typeof runInSession>> | undefined
+  // full-only:end
+  // code-mode: const inSession = undefined as { agentId?: string; error?: string; reply?: string } | undefined
   const isLogin = !cancelled && !!reader.resultError && (reader.authFailed || isLoginFailure(reader.resultError))
+  // full-only:start
   if (isLogin) {
     inSession = await runInSession($, req)
     if (inSession.isUnmarked) inSession = await runInSession($, req)
@@ -193,6 +209,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     cancelled = inSession.cancelled === true
     error = checked !== undefined ? undefined : cancelled ? 'cancelled' : `${CLI_LOGIN} (The CLI said: ${reader.resultError}) /better then tried a read-only fork of this session instead, and ${inSession.error}.`
   }
+  // full-only:end
+  // code-mode: if (isLogin) error = `${CLI_LOGIN} (The CLI said: ${reader.resultError})`
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
     kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, addDirs, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
@@ -353,6 +371,7 @@ async function back($: EngineInterface, surface?: Surface): Promise<string | und
   return isFilled ? undefined : "The input box couldn't take the prompt; it is kept for you, see the note above the prompt. Nothing was sent."
 }
 
+// full-only:start
 async function briefCwd($: EngineInterface, asked: string | undefined): Promise<{ cwd?: string } | { deny: string }> {
   if (asked === undefined || !asked.trim()) return {}
   const base = await $.session.cwd()
@@ -374,6 +393,7 @@ async function checkBrief($: EngineInterface, brief: string, cwd: string | undef
     await stopTickerIfIdle($)
   }
 }
+// full-only:end
 
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
@@ -386,8 +406,11 @@ export const register: Register = (on) => {
     const started = await next(e)
     await $.command.register({ name: 'better', description: 'Deepen a prompt (or the current task) with a read-only helper in the background, then put the improved prompt in your input box', argumentHint: '[prompt]' })
     await $.command.register({ name: 'better-cancel', description: 'Stop the /better helper that is running; nothing is sent' })
+    // full-only:start
     await $.command.register({ name: 'better-boomerang', description: 'Watch a read-only fork of this chat deepen a prompt (or the current task), then come back with it in your input box', argumentHint: '[prompt]' })
+    // full-only:end
     await $.command.register({ name: 'better-back', description: 'Put a waiting /better or /better-boomerang prompt in your input box' })
+    // full-only:start
     await $.tool.register({
       name: TOOL,
       isDeferred: false,
@@ -407,9 +430,11 @@ export const register: Register = (on) => {
         additionalProperties: false,
       },
     })
+    // full-only:end
     return started
   })
 
+  // full-only:start
   on('tool.check', async ($, e, next) => {
     if (!S.isHelper && !(e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA)) ?? []).includes(e.agentId)))) return next(e)
     const verdict = helperVerdict(e.tool, e.isReadOnly)
@@ -418,6 +443,7 @@ export const register: Register = (on) => {
     const isFork = e.agentId !== undefined && (S.forks.has(e.agentId) || ((await read($, forksA).catch(() => [] as string[])) ?? []).includes(e.agentId))
     return S.isHelper || isFork ? { decision: 'deny', reason: "/better's guard failed, so the call is refused" } : next(e)
   })
+  // full-only:end
 
   on('command.run', { command: 'better' }, async ($, e) => {
     if (S.isHelper) return { text: '/better is off inside its own helper.' }
@@ -461,6 +487,7 @@ export const register: Register = (on) => {
     return { text: '/better cancelled; nothing was sent.', isTextDisplayOnly: true }
   })
 
+  // full-only:start
   on('command.run', { command: 'better-boomerang' }, async ($, e) => {
     if (S.isHelper) return { text: '/better-boomerang is off inside its own helper.' }
     const prompt = e.args.trim()
@@ -481,6 +508,7 @@ export const register: Register = (on) => {
     const how = viewed.deny ? `It runs in the background; its row in this chat shows when it's done (${viewed.deny}).` : 'You are watching it now.'
     return { text: `/better-boomerang is researching in a read-only fork of this chat. ${how} When it's done, press "Back with prompt" above the prompt (or /better-back).`, isTextDisplayOnly: true }
   })
+  // full-only:end
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined && S.tasks.has(e.text)) {
@@ -513,6 +541,7 @@ export const register: Register = (on) => {
     return { text: said ?? 'The improved prompt is in your input box.', isTextDisplayOnly: true }
   })
 
+  // full-only:start
   on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
     const input = e as unknown as { brief?: unknown; cwd?: unknown }
     if (typeof input.brief !== 'string' || !input.brief.trim()) return { deny: 'check_brief needs the brief.' }
@@ -534,6 +563,7 @@ export const register: Register = (on) => {
     if (!out.ok) return { deny: out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}` }
     return next({ ...e, prompt: out.checked })
   }).catch(($, e, next) => (next.called ? next(e) : typeof e.prompt === 'string' && BRIEF_MARK.test(e.prompt) ? { deny: "/better's brief check failed, so the subagent didn't start." } : next(e)))
+  // full-only:end
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (S.isHelper) return next(e)

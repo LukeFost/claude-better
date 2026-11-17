@@ -2,5 +2,8 @@
   "name": "claude-better",
   "description": "better: /better turns a rough prompt into a deeper one built from your own code and files. A Claude Code port of pi-better.",
   "owner": { "name": "Luke Foster", "url": "https://github.com/LukeFost" },
-  "plugins": [{ "name": "better", "source": "./" }]
+  "plugins": [
+    { "name": "better", "source": "./" },
+    { "name": "better-code-mode", "source": "./code-mode" }
+  ]
 }

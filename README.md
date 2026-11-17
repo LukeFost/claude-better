@@ -45,6 +45,29 @@ While it works, a two-row strip (the *band*) above the input box shows what the 
 
 ![/better in a Claude Code terminal session: the band shows the helper reading the ledger fixture's files, then the deeper prompt lands in the input box](docs/better.gif)
 
+## Code Mode
+
+Claude Code's experimental Code Mode (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`, interactive terminal only) refuses to start while an enabled plugin hooks tool calls, and `better` hooks three: the helper's read-only guard, the `check_brief` tool and the `/better ` Agent prefix. Claude Code 2.1.326 says so at startup and goes on with the ordinary tools.
+
+`better-code-mode` is the same plugin without those hooks. Enable it in place of `better`, not beside it, since both answer `/better`:
+
+```sh
+claude plugin install better-code-mode@claude-better
+claude plugin disable better@claude-better
+```
+
+| | `better` | `better-code-mode` |
+|---|---|---|
+| `/better`, `/better-cancel`, `/better-back`, the band, the draft pane | yes | yes |
+| The helper is held to reads | by the plugin's own guard | by a guard module only the helper process loads (`code-mode/guard`) |
+| `check_brief` and the `/better ` Agent prefix | yes | no: a plugin tool is served by a tool-call hook |
+| `/better-boomerang` | yes | no: only a tool-call hook holds a fork of your session to reads |
+| An expired CLI login | falls back to a read-only fork of your session | fails and names the fix, `claude auth login` |
+
+Tested on 2.1.326: with only `better-code-mode` enabled, a terminal session offers the Code Mode opt-in instead of refusing it, and `/better` fills the input box with Code Mode declined. Not tested: `/better` inside a session that has Code Mode on. The helper resumes a fork of your session with `claude -p`, where Code Mode isn't available, and Claude Code says a Code Mode session can be resumed only with Code Mode on, so from the second turn on the helper may fail to start there.
+
+`code-mode/` is generated from the full plugin by `scripts/build-code-mode.mjs`; edit `hooks/` and run the script, never the copy.
+
 ## Why
 
 Felix Rieseberg argues in [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/) that most of us ask models for too little. One of his four kinds of ambition is depth: "Considering a task the way a field-leading expert would ... we go one level deeper and touch the underlying data, tools, and problems."
@@ -127,6 +150,9 @@ claude plugin test .     # 61 tests; the flows run on the terminal and desktop s
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
+node scripts/build-code-mode.mjs            # rebuild code-mode/ after any change under hooks/ or types/
+node --test scripts/*.node-test.mjs         # fails when code-mode/ is out of date or still hooks tool calls
+node scripts/test-code-mode.mjs             # 6 tests: better-code-mode and its guard, each against its own plugin
 ```
 
 ## Remove

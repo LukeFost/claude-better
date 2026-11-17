@@ -4,6 +4,11 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+### Added
+
+- `better-code-mode`, a second plugin in this marketplace for Claude Code's experimental Code Mode, which refuses to start while an enabled plugin hooks tool calls. It is `better` without its three tool-call hooks: it keeps `/better`, `/better-cancel`, `/better-back`, the band and the draft pane, and has no `check_brief`, no `/better ` Agent prefix, no `/better-boomerang` and no fork fallback for an expired CLI login. Its helper is held to reads by a guard module that only the helper process loads. Enable it in place of `better`, not beside it. `better` itself is unchanged. Not tested inside a session with Code Mode on; see the README's Code Mode section.
+- `scripts/build-code-mode.mjs` generates `code-mode/` from the full plugin, and a test fails when the copy is out of date.
+
 ## [0.5.1] - 2026-11-17
 
 ### Changed
