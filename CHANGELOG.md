@@ -8,7 +8,7 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ### Fixed
 
-- `/better` failed after the first turn of a session with Code Mode on: the helper's `claude -p` can't resume a Code Mode session ("Failed to resume session"). When that start fails, the helper now runs once more without the session and gets the conversation as text (messages, replies and tool calls with their results, the newest 60,000 characters). It reads the code itself under the same guard. The run record gains `resumeError`. This is in both plugins.
+- `/better` failed after the first turn of a session with Code Mode on: the helper's `claude -p` can't resume a Code Mode session ("Failed to resume session"). When that start fails, the helper now runs once more without the session and gets the conversation as text (messages, replies and tool calls with their results, the newest ones up to about 60,000 characters, long parts cut). It reads the code itself under the same guard. The run record gains `resumeError` and `transcriptChars`. This is in both plugins.
 
 ## [0.6.0] - 2026-11-17
 

@@ -64,7 +64,7 @@ claude plugin disable better@claude-better
 | `/better-boomerang` | yes | no: only a tool-call hook holds a fork of your session to reads |
 | An expired CLI login | falls back to a read-only fork of your session | fails and names the fix, `claude auth login` |
 
-Inside a session that has Code Mode on, the helper can't open your session: it runs with `claude -p`, where Code Mode isn't available, and a Code Mode session can be resumed only with Code Mode on. So when that start fails, `/better` runs the helper once more on its own and gives it the conversation as text: your messages, Claude's replies and each tool call with its result, the newest 60,000 characters. The helper still reads the code itself, under the same read-only guard. The run record's `resumeError` says when this happened. Before the first turn there is no session to open and nothing changes.
+Inside a session that has Code Mode on, the helper can't open your session: it runs with `claude -p`, where Code Mode isn't available, and a Code Mode session can be resumed only with Code Mode on. So when that start fails, `/better` runs the helper once more on its own and gives it the conversation as text: your messages, Claude's replies and tool calls with their results, newest first until about 60,000 characters are kept, with each long message, tool input and tool result cut short. The helper still reads the code itself, under the same read-only guard. The run record's `resumeError` says when this happened. Before the first turn there is no session to open and nothing changes.
 
 Tested on 2.1.326: with only `better-code-mode` enabled, a terminal session starts in Code Mode instead of refusing it, and `/better` fills the input box there, both before the first turn and after one.
 

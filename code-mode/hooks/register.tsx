@@ -93,6 +93,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   let stderr = ''
   let exit: { code: number | null; signal: string | null } | undefined
   let resumeError: string | undefined
+  let transcriptChars = 0
   let error: string | undefined
   let cancelled = false
   let checked: string | undefined
@@ -119,10 +120,12 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
       // A session this CLI can't open (one started in Code Mode, say) fails before the helper reads anything.
       // Run it once more on its own, with the conversation as text in place of the session.
       if (resumeError !== undefined || !sessionId || stop.signal.aborted || !exit || exit.code === 0 || !isResumeFailure(stderr)) break
-      resumeError = stderr.trim().split('\n').slice(-1)[0] ?? ''
+      resumeError = stderr.trim().split('\n').find(isResumeFailure) ?? ''
       // The guard's proof must come from the run whose result is used, never from the one that failed.
       await $.fs.write(log, '{}')
       const said = transcriptNote(await $.session.messages().catch(() => []))
+      if (stop.signal.aborted) break
+      transcriptChars = said.length
       argv = helperArgv({ claude, model, pluginRoot, addDirs })
       input = [req.task, said, readNote(cwd, addDirs)].filter(Boolean).join('\n\n')
       reader = new StreamReader(cwd, home)
@@ -160,7 +163,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
     kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, addDirs, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
-    error, ...(resumeError !== undefined ? { resumeError } : {}), stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
+    error, ...(resumeError !== undefined ? { resumeError, transcriptChars } : {}), stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
     reply: reader.reply, checked, ...(inSession ? { cliError: reader.resultError, inSession: { agentId: inSession.agentId, error: inSession.error, reply: inSession.reply } } : {}),
   }
   const pruneError = await pruneRuns($, runs)
