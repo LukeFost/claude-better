@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BetterBoomerang, BetterRun } from '../types'
+import type { BetterBoomerang, BetterRun, BetterWaiting } from '../types'
 import {
-  BRIEF_MARK, CLI_LOGIN, GUARD_ENV, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  BRIEF_MARK, CLI_LOGIN, FILL_TRIES, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
   desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
@@ -11,13 +11,14 @@ const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun |
 const briefsA = atom({ plugin: 'better', key: 'briefs' } as const, 0)
 const boomA = atom({ plugin: 'better', key: 'boomerang' } as const, null as BetterBoomerang | null)
 const forksA = atom({ plugin: 'better', key: 'forks' } as const, [] as string[])
+const waitingA = atom({ plugin: 'better', key: 'waiting' } as const, null as BetterWaiting | null)
 const tickA = atom({ plugin: 'better', key: 'tick' } as const, 0)
 
 const TOOL = 'check_brief'
 const TOOL_NAME = `mcp__better__${TOOL}`
 
 type Outcome =
-  | { ok: true; checked: string; log: string }
+  | { ok: true; checked: string; log: string; refused: number }
   | { ok: false; cancelled: boolean; isLogin?: boolean; error: string; log: string }
 
 type HelperRequest = { kind: 'better' | 'brief'; input: string; task: string; cwd?: string; signal: AbortSignal; onProgress?: (r: StreamReader) => void }
@@ -32,6 +33,36 @@ async function findClaude($: EngineInterface, home: string): Promise<string | un
     if (build.kind === 'dir' && (await $.fs.exists(path).catch(() => false))) return path
   }
   return undefined
+}
+
+async function readDirs($: EngineInterface, input: string, cwd: string, home: string): Promise<string[]> {
+  const said: string[] = []
+  const messages = await $.session.messages().catch(() => [])
+  if (Array.isArray(messages)) {
+    for (const m of messages.slice(-300)) {
+      said.push(m.text ?? '')
+      for (const use of m.toolUses ?? []) for (const v of Object.values(use.input ?? {})) if (typeof v === 'string') said.push(v)
+    }
+  }
+  const realHome = (await $.fs.stat(home, { resolve: true }).catch(() => undefined))?.realPath ?? home
+  const isRepo = new Map<string, boolean>()
+  const roots: string[] = []
+  let checked = 0
+  for (const path of [...namedPaths([input], home), ...namedPaths(said, home)]) {
+    if (roots.length >= MAX_READ_DIRS || checked >= 200) break
+    const candidates = isInside(path, [cwd]) ? [] : rootCandidates(path, home)
+    if (!candidates.length) continue
+    checked++
+    for (const dir of candidates) {
+      let hit = isRepo.get(dir)
+      if (hit === undefined) isRepo.set(dir, (hit = await $.fs.exists(`${dir}/.git`).catch(() => false)))
+      if (!hit) continue
+      const real = (await $.fs.stat(dir, { resolve: true }).catch(() => undefined))?.realPath
+      if (real && rootCandidates(real, realHome)[0] === real && !isInside(real, [cwd]) && !roots.includes(real)) roots.push(real)
+      break
+    }
+  }
+  return roots
 }
 
 type ForkEnd = { reason: string; answer: string }
@@ -88,7 +119,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const sessionId = (await $.session.turns()) > 0 ? await $.session.id() : undefined
   const model = await $.session.model()
   const claude = await findClaude($, home)
-  const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: $.plugin.root })
+  const addDirs = req.kind === 'better' ? await readDirs($, req.input, cwd, home).catch(() => [] as string[]) : []
+  const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: $.plugin.root, addDirs })
   const reader = new StreamReader(cwd, home)
   const stop = new AbortController()
   const onAbort = () => stop.abort(req.signal.reason ?? 'cancelled')
@@ -107,7 +139,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   let checked: string | undefined
   try {
     if (!claude) throw new Error(NO_CLAUDE)
-    const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input: req.task })
+    const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input: `${req.task}\n\n${readNote(cwd, addDirs)}` })
     for (;;) {
       const pending = child.next()
       pending.catch(() => {})
@@ -159,13 +191,14 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   }
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
-    kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
+    kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, addDirs, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
     error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
     reply: reader.reply, checked, ...(inSession ? { cliError: reader.resultError, inSession: { agentId: inSession.agentId, error: inSession.error, reply: inSession.reply } } : {}),
   }
   const pruneError = await pruneRuns($, `${home}/.claude/better/runs`)
   await $.fs.write(log, JSON.stringify(pruneError ? { ...record, pruneError } : record, null, 2)).catch(() => {})
-  return checked !== undefined && !error ? { ok: true, checked, log } : { ok: false, cancelled, isLogin: isLogin && !cancelled && !inSession?.agentId, error: error ?? 'unknown failure', log }
+  const refused = reader.tools.filter((t) => t.state === 'failed' && isOutsideRefusal(t.why)).length
+  return checked !== undefined && !error ? { ok: true, checked, log, refused } : { ok: false, cancelled, isLogin: isLogin && !cancelled && !inSession?.agentId, error: error ?? 'unknown failure', log }
 }
 
 async function pruneRuns($: EngineInterface, dir: string): Promise<string | undefined> {
@@ -187,15 +220,34 @@ async function pruneRuns($: EngineInterface, dir: string): Promise<string | unde
   }
 }
 
-async function handOver($: EngineInterface, improved: string, surface?: 'terminal' | 'desktop' | 'vscode' | 'mobile'): Promise<void> {
-  const box = await $.prompt.read()
-  const filled = await $.prompt.fill({ text: handOverText(improved, box.text), mode: 'replace' })
-  if (filled.isFilled) {
-    $.ui.toast(`The improved prompt is in your input box${box.text.trim() ? ", above the draft you'd typed" : ''}. Edit it, then press Enter to send.`, { timeoutMs: 8000 })
-    return
+type Surface = 'terminal' | 'desktop' | 'vscode' | 'mobile'
+
+async function handOver($: EngineInterface, improved: string, opts: { surface?: Surface; saveTo?: string; note?: string; isRetry?: boolean } = {}): Promise<boolean> {
+  let draft = ''
+  let refusal: string | undefined
+  for (let i = 0; i < (opts.isRetry ? 1 : FILL_TRIES); i++) {
+    if (i) await $.process.run(WAIT_ARGV).catch(() => {})
+    draft = (await $.prompt.read()).text
+    const filled = await $.prompt.fill({ text: handOverText(improved, draft), mode: 'replace' })
+    if (filled.isFilled) {
+      await update($, waitingA, () => null)
+      $.ui.toast(`The improved prompt is in your input box${draft.trim() ? ", above the draft you'd typed" : ''}. Edit it, then press Enter to send.${opts.note ?? ''}`, { timeoutMs: 8000 })
+      return true
+    }
+    refusal = filled.refusal
   }
-  const copied = await $.ui.copy({ text: improved, ...(surface ? { surface } : {}) })
-  $.ui.toast(`The input box couldn't take the prompt (${filled.refusal ?? 'refused'}); ${copied.isCopied ? 'it is on your clipboard' : 'see the run log in ~/.claude/better/runs'}. Nothing was sent.`, { timeoutMs: 12000 })
+  const why = fillRefusal(refusal)
+  if (opts.isRetry) {
+    $.ui.toast(`The input box still couldn't take the prompt (${why}). Nothing was sent.`, { timeoutMs: 8000 })
+    return false
+  }
+  const copied = await $.ui.copy({ text: improved, ...(opts.surface ? { surface: opts.surface } : {}) }).catch(() => ({ isCopied: false }))
+  const path = opts.saveTo && (await $.fs.write(opts.saveTo, `${improved}\n`).then(() => opts.saveTo, () => undefined))
+  await update($, waitingA, () => ({ improved, ...(path ? { path } : {}) }))
+  $.ui.log(`/better's improved prompt (not sent; ${why}):\n\n${improved}`)
+  const where = [copied.isCopied ? 'on your clipboard' : '', path ? `saved in ${path}` : '', 'shown in the chat'].filter(Boolean).join(', ')
+  $.ui.toast(`The input box couldn't take the prompt (${why}). It is ${where}. Press "Put in input box" above the prompt, or run /better-back, to try again. Nothing was sent.${opts.note ?? ''}`, { timeoutMs: 20000 })
+  return false
 }
 
 const S: {
@@ -213,14 +265,20 @@ async function stopTickerIfIdle($: EngineInterface): Promise<void> {
   S.ticker = undefined
 }
 
-async function back($: EngineInterface, surface?: 'terminal' | 'desktop' | 'vscode' | 'mobile'): Promise<string | undefined> {
+async function back($: EngineInterface, surface?: Surface): Promise<string | undefined> {
   const boom = await read($, boomA)
-  if (!boom?.improved) return 'No /better-boomerang prompt is waiting.'
+  if (!boom?.improved) {
+    const waiting = await read($, waitingA)
+    if (!waiting) return 'No /better prompt is waiting.'
+    return (await handOver($, waiting.improved, { surface, isRetry: true })) ? undefined : `The input box still couldn't take the prompt${waiting.path ? `; it is saved in ${waiting.path}` : ''}. Nothing was sent.`
+  }
   const viewed = await $.ui.view({})
   if (viewed.deny && boom.isViewed !== false) return `Couldn't switch back to the main conversation: ${viewed.deny}`
-  await handOver($, boom.improved, surface)
+  const home = (await $.env.get('HOME')) ?? ''
+  const saveTo = `${home}/.claude/better/runs/${new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')}-better-${crypto.randomUUID().slice(0, 8)}.md`
+  const isFilled = await handOver($, boom.improved, { surface, saveTo })
   await update($, boomA, () => null)
-  return undefined
+  return isFilled ? undefined : "The input box couldn't take the prompt; it is kept for you, see the note above the prompt. Nothing was sent."
 }
 
 async function briefCwd($: EngineInterface, asked: string | undefined): Promise<{ cwd?: string } | { deny: string }> {
@@ -257,7 +315,7 @@ export const register: Register = (on) => {
     await $.command.register({ name: 'better', description: 'Deepen a prompt (or the current task) with a read-only helper in the background, then put the improved prompt in your input box', argumentHint: '[prompt]' })
     await $.command.register({ name: 'better-cancel', description: 'Stop the /better helper that is running; nothing is sent' })
     await $.command.register({ name: 'better-boomerang', description: 'Watch a read-only fork of this chat deepen a prompt (or the current task), then come back with it in your input box', argumentHint: '[prompt]' })
-    await $.command.register({ name: 'better-back', description: 'Leave the /better-boomerang fork and put its improved prompt in your input box' })
+    await $.command.register({ name: 'better-back', description: 'Put a waiting /better or /better-boomerang prompt in your input box' })
     await $.tool.register({
       name: TOOL,
       isDeferred: false,
@@ -309,7 +367,7 @@ export const register: Register = (on) => {
             void update($, runA, (v) => (v ? { ...v, stage, label, tools: r.tools.map((t) => ({ ...t })) } : v))
           },
         })
-        if (out.ok) await handOver($, out.checked, surface)
+        if (out.ok) await handOver($, out.checked, { surface, saveTo: promptFile(out.log), note: out.refused ? ` The helper was refused ${out.refused === 1 ? '1 read' : `${out.refused} reads`}, most often for a path outside its folders; the run record lists them.` : '' })
         else if (out.cancelled) $.ui.toast('/better cancelled; nothing was sent')
         else $.ui.toast(`/better failed: ${out.error}`, { timeoutMs: 15000 })
       } catch (err) {
@@ -378,7 +436,7 @@ export const register: Register = (on) => {
 
   on('command.run', { command: 'better-back' }, async ($) => {
     const said = await back($, (await $.session.surface()) ?? undefined)
-    return { text: said ?? 'Back in the main conversation; the improved prompt is in your input box.', isTextDisplayOnly: true }
+    return { text: said ?? 'The improved prompt is in your input box.', isTextDisplayOnly: true }
   })
 
   on('tool.call', { tool: TOOL_NAME }, async ($, e, next) => {
@@ -408,7 +466,8 @@ export const register: Register = (on) => {
     const run = await read($, runA)
     const briefs = await read($, briefsA)
     const boom = await read($, boomA)
-    if (!run && !briefs && !boom) return next(e)
+    const waiting = await read($, waitingA)
+    if (!run && !briefs && !boom && !waiting) return next(e)
     await read($, tickA)
     const now = Date.now()
     const width = Math.max(30, e.props.bodyColumns ?? 80)
@@ -450,6 +509,19 @@ export const register: Register = (on) => {
               }} />
             </Box>
           ),
+      )
+    }
+    if (waiting) {
+      rows.push(
+        <Box key="waiting" flexDirection="column">
+          <Box>
+            <Text color="claude">/better's prompt is waiting  </Text>
+            <Button key="put" variant="primary" label="Put in input box" onPress={async () => void (await handOver($, waiting.improved, { surface: e.surface, isRetry: true }))} />
+            <Text>  </Text>
+            <Button key="drop" plain label="dismiss" onPress={() => update($, waitingA, () => null)} />
+          </Box>
+          {waiting.path ? <Text dimColor>   {waiting.path}</Text> : null}
+        </Box>,
       )
     }
     return <Box flexDirection="column">{rows}</Box>

@@ -19,6 +19,7 @@ type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
   forkAnswer?: string | string[]; forkReason?: 'answer' | 'error'
+  fills?: ('no_composer' | 'dialog' | 'ok')[]; isCopied?: boolean; messages?: any[]
 }
 
 const loginError = (text: string) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: text }) + '\n'
@@ -29,8 +30,9 @@ function world(on: any, opts: Opts) {
   const at = { surface: 'terminal' as Surface }
   const seen = {
     clock, at, engine: undefined as any, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[],
-    writes: [] as string[], views: [] as any[], forked: [] as any[], ran: [] as any[], pending: [] as (() => Promise<unknown>)[], reset() {
-      for (const k of ['spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views', 'forked', 'ran', 'pending'] as const) seen[k].length = 0
+    writes: [] as string[], logs: [] as string[], copies: [] as string[], fillTries: 0, written: new Map<string, string>(), views: [] as any[], forked: [] as any[], ran: [] as any[], pending: [] as (() => Promise<unknown>)[], reset() {
+      seen.fillTries = 0
+      for (const k of ['logs', 'copies', 'spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views', 'forked', 'ran', 'pending'] as const) seen[k].length = 0
     },
   }
   const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
@@ -59,7 +61,7 @@ function world(on: any, opts: Opts) {
     if (!names) throw new Error(`ENOENT: ${e.path}`)
     return { value: names.map((name) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }
   })
-  const written = new Map<string, string>()
+  const written = seen.written
   on('fs.write', (_: any, e: any) => (seen.writes.push(e.path), written.set(e.path, e.text), { value: undefined }))
   on('fs.read', (_: any, e: any) => {
     if (!written.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
@@ -67,7 +69,15 @@ function world(on: any, opts: Opts) {
   })
   on('tool.check', () => ({ decision: 'allow', reason: 'core decides' }))
   on('prompt.read', () => ({ value: { text: opts.draft ?? '', cursor: 0 } }))
-  on('prompt.fill', (_: any, e: any) => (seen.filled.push(e.text), { isFilled: true }))
+  on('prompt.fill', (_: any, e: any) => {
+    const how = opts.fills ? opts.fills[Math.min(seen.fillTries, opts.fills.length - 1)] : 'ok'
+    seen.fillTries++
+    if (how === 'ok') return (seen.filled.push(e.text), { isFilled: true })
+    return { isFilled: false, refusal: how }
+  })
+  on('ui.copy', (_: any, e: any) => (seen.copies.push(e.text), { value: opts.isCopied ? { isCopied: true } : { isCopied: false, reason: 'no-clipboard' } }))
+  on('ui.log', (_: any, e: any) => (seen.logs.push(e.text), { value: undefined }))
+  on('session.messages', () => ({ value: opts.messages ?? [] }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
   on('ui.view', (_: any, e: any) => (seen.views.push(e), { value: at.surface === 'terminal' ? {} : { deny: 'no main view here' } }))
   if (opts.spawnDeny) on('agent.spawn', (_: any, e: any) => (seen.forked.push(e), { deny: opts.spawnDeny }))
@@ -387,5 +397,123 @@ test("the CLI's own authentication_failed mark takes the session fork, whatever 
     const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
     expect('result' in ok && ok.result).toBe('Checked by the mark.')
     expect(seen.forked).toHaveLength(1)
+  })
+})
+
+test('a box that is briefly away is tried again, and the prompt lands once it is back', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), fills: ['no_composer', 'dialog', 'ok'] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.fillTries).toBe(3)
+    expect(seen.filled).toEqual(['Deeper prompt.'])
+    expect(seen.copies).toEqual([])
+    expect(seen.toasts.at(-1)).toContain('is in your input box')
+  })
+})
+
+test('when the box and the clipboard both refuse, the whole prompt is saved as a .md file, shown in the chat and kept for a retry', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt,\nsecond line.'), fills: ['no_composer'] })
+  await eachSurface($, seen, async (surface) => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.fillTries).toBe(6)
+    expect(seen.filled).toEqual([])
+    const md = seen.writes.find((p) => p.endsWith('.md'))!
+    expect(md).toMatch(/^\/home\/me\/.claude\/better\/runs\/.*-better-[0-9a-f]{8}\.md$/)
+    expect(seen.written.get(md)).toBe('Deeper prompt,\nsecond line.\n')
+    expect(seen.logs.join('\n')).toContain('Deeper prompt,\nsecond line.')
+    const toast = seen.toasts.at(-1)!
+    expect(toast).toContain(md)
+    expect(toast).toContain("The input box couldn't take the prompt")
+    expect(toast).toContain('Nothing was sent')
+    expect(toast).not.toContain('clipboard')
+    expect(seen.agentRan).toEqual([])
+    const ui = await $.ui.mount({ plugin: 'better', surface, ...BAND })
+    expect(await ui.find({ type: 'Button', key: 'put' })).toBeDefined()
+    await ui.press({ key: 'drop' })
+    await seen.clock.settle()
+  })
+})
+
+test('the waiting prompt goes in the box from the band button or /better-back once the box is back', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), fills: ['no_composer', 'no_composer', 'no_composer', 'no_composer', 'no_composer', 'no_composer', 'no_composer', 'ok'], isCopied: true })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.copies).toEqual(['Deeper prompt.'])
+    expect(seen.toasts.at(-1)).toContain('on your clipboard')
+    const still = await $.command.run({ command: 'better-back', args: '' } as any)
+    expect(still.text).toContain("still couldn't take")
+    expect(seen.filled).toEqual([])
+    const back = await $.command.run({ command: 'better-back', args: '' } as any)
+    expect(back.text).toContain('is in your input box')
+    expect(seen.filled).toEqual(['Deeper prompt.'])
+    expect((await $.command.run({ command: 'better-back', args: '' } as any)).text).toContain('No /better prompt is waiting')
+  })
+})
+
+test('the helper may read the repos the conversation names outside the session folder, and nothing else', async ($, on) => {
+  const seen = world(on, {
+    helperOut: reply('Deeper prompt.'),
+    files: ['/usr/local/bin/claude', '/home/me/code/shop/.git', '/home/me/.ssh/.git', '/home/me/Library/x/.git', '/home/me/.git', '/etc/.git', '/repo/sub/.git'],
+    messages: [
+      { role: 'user', text: 'look at ~/code/shop/src/cart.ts and /etc/hosts and ~/.ssh/config and ~/notes/todo.md', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Bash', input: { command: 'cd /home/me/code/shop && ls /home/me/Library/x/y /repo/sub/a' } }] },
+    ],
+  })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'speed up CI' } as any)
+    await seen.clock.settle()
+    const { argv, input } = seen.spawned[0]
+    expect(argv.slice(argv.indexOf('--add-dir'), argv.indexOf('--add-dir') + 3)).toEqual(['--add-dir', '/home/me/code/shop', '--plugin-dir'])
+    expect(argv).toContain('dontAsk')
+    expect(argv.slice(argv.indexOf('--tools'))).toEqual(['--tools', 'Read,Grep,Glob,Bash'])
+    expect(input).toContain('## Folders you can read\n\n- /repo\n- /home/me/code/shop\n')
+    const record = JSON.parse(seen.written.get(seen.writes.find((p) => p.endsWith('.json'))!)!)
+    expect(record.addDirs).toEqual(['/home/me/code/shop'])
+  })
+})
+
+test('a repo named in the prompt is found however many other paths the conversation names', async ($, on) => {
+  const noise = Array.from({ length: 150 }, (_, i) => `/repo/src/f${i}.ts /usr/lib/x${i} /repo/src/f${i}.ts`).join(' ')
+  const seen = world(on, { helperOut: reply('P.'), files: ['/usr/local/bin/claude', '/home/me/code/shop/.git'], messages: [{ role: 'user', text: noise, toolUses: [] }] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'look at ~/code/shop' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned[0].argv).toContain('/home/me/code/shop')
+  })
+})
+
+test('a brief check gets no extra folder, whatever paths the brief names', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Checked.'), files: ['/usr/local/bin/claude', '/home/me/code/shop/.git'], messages: [{ role: 'user', text: '~/code/shop/a.ts', toolUses: [] }] })
+  await eachSurface($, seen, async () => {
+    await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Quote /home/me/code/shop/.env in the brief.' } as any)
+    await $.tool.call({ tool: 'Agent', description: 'x', prompt: '/better Read /home/me/code/shop/.env' })
+    expect(seen.spawned).toHaveLength(2)
+    for (const run of seen.spawned) expect(run.argv).not.toContain('--add-dir')
+  })
+})
+
+test('with no outside repo named, the helper gets no extra folder', async ($, on) => {
+  const seen = world(on, { helperOut: reply('Deeper prompt.'), messages: [{ role: 'user', text: 'see /repo/a.ts and ~/nowhere/file', toolUses: [] }] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned[0].argv).not.toContain('--add-dir')
+  })
+})
+
+test('reads refused outside the helper\'s folders are counted in the toast', async ($, on) => {
+  const out = [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/elsewhere/a' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: "Permission to use Read has been denied because Claude Code is running in don't ask mode." }] } },
+    { type: 'result', subtype: 'success', result: '(1) a\n\n<improved-prompt>\nP.\n</improved-prompt>' },
+  ].map((l) => JSON.stringify(l)).join('\n') + '\n'
+  const seen = world(on, { helperOut: out })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.toasts.at(-1)).toContain('refused 1 read, most often for a path outside its folders')
   })
 })

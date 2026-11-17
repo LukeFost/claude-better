@@ -108,7 +108,48 @@ export const CLI_LOGIN =
 
 export const WAIT_ARGV = ['/bin/sleep', '1'] as const
 
-export function helperArgv(opts: { claude: string; sessionId?: string; model?: string; pluginRoot: string }): string[] {
+export const FILL_TRIES = 6
+
+export const fillRefusal = (refusal: string | undefined) =>
+  refusal === 'no_composer' ? "this session's input box isn't on screen" : refusal === 'dialog' ? 'a dialog is open over the input box' : 'the input box refused it'
+
+export const promptFile = (log: string) => log.replace(/\.json$/, '.md')
+
+const PATH_IN_TEXT = /(?<![\w.~$>:/-])(?:~\/|\/(?!dev\/))[\w.@+-]+(?:\/[\w.@+-]+)*/g
+
+/** Paths named in the texts, most-named first; ties keep first-seen order. */
+export function namedPaths(texts: readonly string[], home: string): string[] {
+  const counts = new Map<string, number>()
+  for (const text of texts) {
+    for (const [raw] of text.matchAll(PATH_IN_TEXT)) {
+      const path = norm(raw.startsWith('~/') ? `${norm(home)}${raw.slice(1)}` : raw).replace(/\.+$/, '')
+      if (path.split('/').includes('..')) continue
+      counts.set(path, (counts.get(path) ?? 0) + 1)
+    }
+  }
+  return [...counts].toSorted((a, b) => b[1] - a[1]).map(([path]) => path)
+}
+
+export function rootCandidates(path: string, home: string): string[] {
+  const h = norm(home)
+  const base = h.length > 1 && path.startsWith(`${h}/`) ? h : path.startsWith('/Volumes/') ? '/Volumes' : undefined
+  if (!base) return []
+  const all = path.slice(base.length + 1).split('/').filter(Boolean)
+  const hidden = all.findIndex((p) => p.startsWith('.') || p.toLowerCase() === 'library')
+  const parts = hidden < 0 ? all : all.slice(0, hidden)
+  const out: string[] = []
+  for (let n = parts.length; n >= (base === h ? 1 : 2); n--) out.push(`${base}/${parts.slice(0, n).join('/')}`)
+  return out
+}
+
+export const MAX_READ_DIRS = 4
+
+export const readNote = (cwd: string, dirs: readonly string[]) =>
+  `## Folders you can read\n\n${[cwd, ...dirs].map((d) => `- ${d}`).join('\n')}\n\nReads anywhere else are refused, and git runs only in the first folder: in the others read the files themselves (Read, Grep, Glob, grep, cat). If you needed a file outside these folders, say so in one line at the top of your reply and name the folder.`
+
+export const isOutsideRefusal = (why: string | undefined) => /don't ask mode/i.test(why ?? '')
+
+export function helperArgv(opts: { claude: string; sessionId?: string; model?: string; pluginRoot: string; addDirs?: readonly string[] }): string[] {
   return [
     opts.claude, '-p',
     '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -118,6 +159,7 @@ export function helperArgv(opts: { claude: string; sessionId?: string; model?: s
     '--setting-sources', '',
     '--strict-mcp-config',
     ...(opts.model ? ['--model', opts.model] : []),
+    ...(opts.addDirs?.length ? ['--add-dir', ...opts.addDirs] : []),
     '--plugin-dir', opts.pluginRoot,
     '--tools', HELPER_TOOLS.join(','),
   ]
@@ -168,11 +210,15 @@ export function chipLabel(label: string, max = 28): string {
 export const toolLine = (t: ToolRow) => `${t.state} ${t.label}${t.why ? `: ${t.why}` : ''}`
 
 export const KEEP_RUNS = 200
-const RUN_RECORD = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:better|brief)-[0-9a-f]{8}\.json$/
+const RUN_RECORD = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:better|brief)-[0-9a-f]{8}\.(?:json|md)$/
+
+const stem = (n: string) => n.replace(/\.(?:json|md)$/, '')
 
 export function staleRecords(names: readonly string[], keep = KEEP_RUNS): string[] {
-  const records = names.filter((n) => RUN_RECORD.test(n)).toSorted()
-  return records.slice(0, Math.max(0, records.length - keep))
+  const all = names.filter((n) => RUN_RECORD.test(n)).toSorted()
+  const stems = [...new Set(all.map(stem))]
+  const kept = new Set(stems.slice(Math.max(0, stems.length - keep)))
+  return all.filter((n) => !kept.has(stem(n)))
 }
 
 export class StreamReader {

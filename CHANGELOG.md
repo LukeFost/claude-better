@@ -4,6 +4,19 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-17
+
+### Fixed
+
+- `/better` no longer loses the improved prompt when the input box can't take it. In the desktop app the box refuses (`no_composer`) while the session isn't on screen, for example when you switched to another session during the run, and the clipboard refuses for the same reason; the old toast then pointed at a JSON run record. Now the fill is tried for about 5 seconds, and if it still fails the whole prompt is saved as a plain `.md` file beside the run record (full path in the toast), shown in the chat, and kept: a "Put in input box" button above the prompt, or `/better-back`, fills it once you are back. Nothing is sent.
+- The helper can read the project when the session runs somewhere else. Its `claude -p` denies every read outside its working folder, so a session with no project folder (or one started elsewhere) got a prompt built from the conversation alone. The helper now also gets, read-only, up to 4 git repositories that the prompt or the conversation names by path. Only repositories under your home folder or on a named volume qualify, never a dot folder or `Library`, and paths in your own prompt are looked at first. Brief checks get no extra folder, since an agent writes the brief. The guard is unchanged: writes and commands that are not read-only are still refused, which includes `git` in those extra folders.
+- When reads outside the helper's folders are still refused, the toast says how many, and the helper is told to say so at the top of its reply.
+
+### Changed
+
+- `/better-back` also fills a waiting `/better` prompt, not only a `/better-boomerang` one.
+- Run records list the extra folders as `addDirs`. A saved `.md` prompt is pruned with its run record.
+
 ## [0.4.7] - 2026-11-17
 
 ### Fixed
@@ -52,7 +65,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.8
 [0.4.7]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.7
 [0.4.6]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.6
 [0.4.5]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.5

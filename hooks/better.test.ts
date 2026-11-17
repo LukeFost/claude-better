@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
-  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine,
+  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine, namedPaths, rootCandidates, promptFile, fillRefusal,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -115,4 +115,29 @@ test("a login failure of the helper's CLI is told apart from every other failure
   for (const said of ['API Error: 529 Overloaded', 'error_max_turns', 'The reply has no <improved-prompt> block.', 'Credit balance is too low',
     'API Error: 403 {"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}', 'Your account does not have access to Claude Code. Please run /login.',
   ]) expect(isLoginFailure(said)).toBe(false)
+})
+
+test('paths named in text are found, ~ expanded, most-named first', () => {
+  const found = namedPaths(['see ~/code/shop/a.ts, /etc/hosts. Also "https://x.dev/a/b" and src/rel/path', 'cd /home/me/code/shop/a.ts; cat ~/code/../.ssh/id'], '/home/me')
+  expect(found[0]).toBe('/home/me/code/shop/a.ts')
+  expect(found).toContain('/etc/hosts')
+  expect(found.some((p) => p.includes('x.dev') || p.includes('rel') || p.includes('..'))).toBe(false)
+})
+
+test('only folders under home (not dot folders or Library) or a named volume can become read folders', () => {
+  expect(rootCandidates('/home/me/code/shop/src/a.ts', '/home/me')).toEqual(['/home/me/code/shop/src/a.ts', '/home/me/code/shop/src', '/home/me/code/shop', '/home/me/code'])
+  expect(rootCandidates('/Volumes/Wizard/wt/a', '/home/me')).toEqual(['/Volumes/Wizard/wt/a', '/Volumes/Wizard/wt'])
+  for (const p of ['/home/me', '/home/me/.ssh/config', '/home/me/Library/App/x', '/home/me/library/Developer/x', '/home/me/LIBRARY/x', '/etc/hosts', '/home/meow/x', '/Volumes/Wizard', '/Volumes/Wizard/.claude/x']) expect(rootCandidates(p, '/home/me')).toEqual([])
+  expect(rootCandidates('/home/me/code/shop/.git/config', '/home/me')).toEqual(['/home/me/code/shop', '/home/me/code'])
+  expect(rootCandidates('/home/me/code/shop/.github/ci.yml', '/home/me')).toEqual(['/home/me/code/shop', '/home/me/code'])
+  expect(rootCandidates('/Volumes/Backup/Users/me/.ssh/id', '/home/me')).toEqual(['/Volumes/Backup/Users/me', '/Volumes/Backup/Users'])
+  expect(rootCandidates('/x/y', '/')).toEqual([])
+})
+
+const stem = (i: number) => `2026-01-01T00-00-00-00${i}Z-better-0000abcd`
+
+test('the saved prompt sits beside its run record and is pruned with it', () => {
+  expect(promptFile('/r/2026-01-01T00-00-00-000Z-better-0000abcd.json')).toBe('/r/2026-01-01T00-00-00-000Z-better-0000abcd.md')
+  expect(staleRecords([`${stem(1)}.json`, `${stem(1)}.md`, `${stem(2)}.json`, `${stem(3)}.md`], 2)).toEqual([`${stem(1)}.json`, `${stem(1)}.md`])
+  expect(fillRefusal('no_composer')).toContain("isn't on screen")
 })

@@ -16,6 +16,8 @@ export type BetterBoomerang = {
   isViewed?: boolean
 }
 
+export type BetterWaiting = { improved: string; path?: string }
+
 declare module 'claude-code' {
   interface PluginState {
     better: {
@@ -24,6 +26,7 @@ declare module 'claude-code' {
       boomerang: BetterBoomerang | null
       tick: number
       forks: string[]
+      waiting: BetterWaiting | null
     }
   }
 }
