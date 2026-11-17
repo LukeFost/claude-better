@@ -101,6 +101,13 @@ export const NO_CLAUDE =
   "Couldn't find the `claude` CLI for the helper: it isn't on PATH, in ~/.local/bin, /opt/homebrew/bin or /usr/local/bin, or in the desktop app's own engine. " +
   'Install it (https://code.claude.com/docs/en/setup) so `which claude` finds it in a login shell, then start a new session.'
 
+export const isLoginFailure = (said: string) => /failed to authenticate|not logged in|oauth (session|token)|invalid api key|invalid bearer|authentication_error/i.test(said)
+
+export const CLI_LOGIN =
+  "The helper runs the `claude` CLI, and that CLI's own login has expired or is missing (it is kept apart from the login of the app you are in). Run `claude auth login` in a terminal to fix it."
+
+export const WAIT_ARGV = ['/bin/sleep', '1'] as const
+
 export function helperArgv(opts: { claude: string; sessionId?: string; model?: string; pluginRoot: string }): string[] {
   return [
     opts.claude, '-p',

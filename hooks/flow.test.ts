@@ -18,15 +18,19 @@ const reply = (body: string) =>
 type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
+  forkAnswer?: string; forkReason?: 'answer' | 'error'
 }
+
+const loginError = (text: string) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: text }) + '\n'
+const EXPIRED = loginError('Failed to authenticate: OAuth session expired and could not be refreshed')
 
 function world(on: any, opts: Opts) {
   const clock = mock.clock(on)
   const at = { surface: 'terminal' as Surface }
   const seen = {
-    clock, at, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[],
-    writes: [] as string[], views: [] as any[], reset() {
-      for (const k of ['spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views'] as const) seen[k].length = 0
+    clock, at, engine: undefined as any, spawned: [] as any[], filled: [] as string[], toasts: [] as string[], agentRan: [] as string[],
+    writes: [] as string[], views: [] as any[], forked: [] as any[], ran: [] as any[], pending: [] as (() => Promise<unknown>)[], reset() {
+      for (const k of ['spawned', 'filled', 'toasts', 'agentRan', 'writes', 'views', 'forked', 'ran', 'pending'] as const) seen[k].length = 0
     },
   }
   const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
@@ -66,8 +70,23 @@ function world(on: any, opts: Opts) {
   on('prompt.fill', (_: any, e: any) => (seen.filled.push(e.text), { isFilled: true }))
   on('ui.toast', (_: any, e: any) => (seen.toasts.push(e.text), { value: undefined }))
   on('ui.view', (_: any, e: any) => (seen.views.push(e), { value: at.surface === 'terminal' ? {} : { deny: 'no main view here' } }))
-  if (opts.spawnDeny) on('agent.spawn', () => ({ deny: opts.spawnDeny }))
+  if (opts.spawnDeny) on('agent.spawn', (_: any, e: any) => (seen.forked.push(e), { deny: opts.spawnDeny }))
+  else if (opts.forkAnswer !== undefined) {
+    on('agent.spawn', async (_: any, e: any) => {
+      const agentId = `fork-${seen.forked.push(e)}`
+      await seen.engine.turn.start({ agentId, turnId: 't', text: e.prompt })
+      seen.pending.push(() => seen.engine.turn.complete({ agentId, turnId: 't', reason: opts.forkReason ?? 'answer', answer: opts.forkAnswer, durationMs: 1, isAborted: false }))
+      return { model: 'claude-opus-5-5' }
+    })
+  }
+  on('turn.complete', (_: any, e: any) => ({ text: e.answer }))
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId ?? 't' }))
   on('tool.call', { tool: 'Agent' }, (_: any, e: any) => (seen.agentRan.push(e.prompt), { result: 'subagent done' }))
+  on('process.run', async (_: any, e: any) => {
+    seen.ran.push(e.argv)
+    if (seen.ran.length % 2 === 0) for (const end of seen.pending.splice(0)) await end()
+    return { value: { exitCode: 0, stdout: '', stderr: '' } }
+  })
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
     if (!opts.isGuardless) written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
@@ -82,6 +101,7 @@ function world(on: any, opts: Opts) {
 }
 
 async function eachSurface($: any, seen: ReturnType<typeof world>, run: (surface: Surface) => Promise<void>) {
+  seen.engine = $
   for (const surface of SURFACES) {
     seen.at.surface = surface
     seen.reset()
@@ -258,5 +278,73 @@ test('check_brief only points the helper at the session folder or inside it', as
     const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Fix it.', cwd: 'pkg/app' } as any)
     expect('result' in ok && ok.result).toBe('Checked.')
     expect(seen.spawned[0].cwd).toBe('/repo/pkg/app')
+  })
+})
+
+test("an expired CLI login doesn't block check_brief: a read-only fork of the session checks the brief", async ($, on) => {
+  const seen = world(on, { helperOut: EXPIRED, helperCode: 1, forkAnswer: '(1) a\n(2) b\n(3) c\n\n<improved-prompt>\nChecked in the session.\n</improved-prompt>' })
+  await eachSurface($, seen, async () => {
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in ok && ok.result).toBe('Checked in the session.')
+    expect(seen.spawned).toHaveLength(1)
+    expect(seen.forked).toHaveLength(1)
+    expect(seen.ran).toEqual([['/bin/sleep', '1'], ['/bin/sleep', '1']])
+    expect(JSON.stringify(seen.forked[0])).toMatch(/"subagent_?[tT]ype":"fork"/)
+    expect(seen.forked[0].prompt).toContain('## Brief to check\n\nRough brief.')
+    const agentId = `fork-${seen.forked.length}`
+    expect((await $.tool.check({ tool: 'Edit', agentId, input: { file_path: 'a', old_string: 'x', new_string: 'y' } } as any)).decision).toBe('deny')
+    expect((await $.tool.check({ tool: 'Bash', agentId, input: { command: 'touch zz' } } as any)).decision).toBe('deny')
+    expect((await $.tool.check({ tool: 'Read', agentId, input: { file_path: 'a' } } as any)).reason).toBe('core decides')
+    const r = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
+    expect(seen.agentRan).toEqual(['Checked in the session.'])
+    expect('deny' in r && r.deny).toBeFalsy()
+  })
+})
+
+test('a missing CLI login takes the same road, for /better too', async ($, on) => {
+  const seen = world(on, { helperOut: loginError('Not logged in · Please run /login'), helperCode: 1, forkAnswer: '<improved-prompt>\nDeeper prompt.\n</improved-prompt>' })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.filled).toEqual(['Deeper prompt.'])
+  })
+})
+
+test('when the session fork is refused too, the error names the command and lets the work go on unchecked', async ($, on) => {
+  const seen = world(on, { helperOut: EXPIRED, helperCode: 1, spawnDeny: 'auto mode gave no verdict' })
+  await eachSurface($, seen, async () => {
+    const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    const deny = 'deny' in r ? String(r.deny) : ''
+    expect(deny).toContain('`claude auth login`')
+    expect(deny).toContain('you may start the work with the unchecked brief')
+    expect(deny).toContain('auto mode gave no verdict')
+    expect(deny).not.toContain('do not start')
+    const a = await $.tool.call({ tool: 'Agent', description: 'fix', prompt: '/better Fix it.' })
+    expect(seen.agentRan).toEqual([])
+    expect(JSON.stringify(a)).toContain('`claude auth login`')
+    expect(JSON.stringify(a)).toContain('without the /better prefix')
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.toasts.some((t) => t.includes('`claude auth login`'))).toBe(true)
+    expect(seen.filled).toEqual([])
+  })
+})
+
+test('a session fork that ran and failed is not a checked brief, and still blocks the work', async ($, on) => {
+  const seen = world(on, { helperOut: EXPIRED, helperCode: 1, forkAnswer: '', forkReason: 'error' })
+  await eachSurface($, seen, async () => {
+    const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in r && r.result).toBeFalsy()
+    expect('deny' in r && String(r.deny)).toContain('`claude auth login`')
+    expect('deny' in r && String(r.deny)).toContain('do not start the work with it')
+  })
+})
+
+test('a failure that is not a login problem starts no session fork and still blocks the work', async ($, on) => {
+  const seen = world(on, { helperOut: loginError('API Error: 529 Overloaded'), helperCode: 1, forkAnswer: '<improved-prompt>\nNever used.\n</improved-prompt>' })
+  await eachSurface($, seen, async () => {
+    const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect(seen.forked).toHaveLength(0)
+    expect('deny' in r && String(r.deny)).toContain('do not start the work with it')
   })
 })

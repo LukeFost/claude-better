@@ -4,6 +4,13 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-17
+
+### Fixed
+
+- An expired or missing login of the `claude` CLI no longer blocks `/better` or `check_brief`. The desktop app keeps its own login, so the CLI's can expire while the app works; the check then failed with "OAuth session expired and could not be refreshed" until you ran `claude auth login`. Now the same task runs as a read-only fork of your session, on the session's login.
+- If that fork can't start either, the error says what expired and the command to run, and an agent may go on with the unchecked brief after telling you. Every other failure still blocks the work. Cursor gets the same message.
+
 ## [0.4.3] - 2026-11-16
 
 ### Fixed
@@ -27,6 +34,7 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.4
 [0.4.3]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.3
 [0.4.2]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.2

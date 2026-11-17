@@ -47,3 +47,15 @@ test('the runs folder keeps only the newest records and leaves other files alone
     fake.restore()
   }
 })
+
+test("an expired CLI login says what expired and the command to run, and is marked so a brief isn't blocked", async () => {
+  const fake = fakeClaude(`echo '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}'\nexit 1`)
+  try {
+    const out = await runHelper({ kind: 'brief', input: 'x', cwd: fake.home })
+    assert.equal(out.ok, false)
+    assert.equal(!out.ok && out.isLogin, true)
+    assert.match(!out.ok ? out.error : '', /CLI's own login has expired or is missing.*Run `claude auth login` in a terminal/)
+  } finally {
+    fake.restore()
+  }
+})

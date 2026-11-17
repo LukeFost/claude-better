@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
-  chipLabel, staleRecords, toolLabel, toolLine,
+  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -103,4 +103,14 @@ test('only the oldest run records beyond the cap are stale, and nothing else in 
   const stale = staleRecords(names.toReversed().concat(['notes.txt', 'other.json', 'x-better-1.json']))
   expect(stale).toEqual(names.slice(0, 3))
   expect(staleRecords(names.slice(0, 5))).toEqual([])
+})
+
+test("a login failure of the helper's CLI is told apart from every other failure", () => {
+  for (const said of [
+    'Failed to authenticate: OAuth session expired and could not be refreshed', 'Not logged in · Please run /login', 'Failed to authenticate. API Error: 401 Invalid bearer token',
+    'Invalid API key · Fix external API key', 'OAuth token revoked · Please run /login', 'OAuth session expired',
+  ]) expect(isLoginFailure(said)).toBe(true)
+  for (const said of ['API Error: 529 Overloaded', 'error_max_turns', 'The reply has no <improved-prompt> block.', 'Credit balance is too low',
+    'API Error: 403 {"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}', 'Your account does not have access to Claude Code. Please run /login.',
+  ]) expect(isLoginFailure(said)).toBe(false)
 })

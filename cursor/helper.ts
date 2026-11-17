@@ -3,12 +3,12 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
-  GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates,
+  CLI_LOGIN, GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, isLoginFailure, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates,
   helperArgv, helperExitError, KEEP_RUNS, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from '../hooks/better.ts'
 
 export type Kind = 'better' | 'brief'
-export type Outcome = { ok: true; text: string; log: string } | { ok: false; cancelled: boolean; error: string; log: string }
+export type Outcome = { ok: true; text: string; log: string } | { ok: false; cancelled: boolean; isLogin?: boolean; error: string; log: string }
 
 export const PLUGIN_ROOT = resolve(dirname(realpathSync(new URL(import.meta.url).pathname)), '..')
 
@@ -81,6 +81,7 @@ export function runHelper(req: {
       const fail = (error: string, cancelled = false) => done(settle(record, { ok: false, cancelled, error, log }))
       if (stopped === 'cancelled') return fail('cancelled', true)
       if (stopped === 'timeout') return fail(`The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`)
+      if (reader.resultError && isLoginFailure(reader.resultError)) return done(settle({ ...record, cliError: reader.resultError }, { ok: false, cancelled: false, isLogin: true, error: `${CLI_LOGIN} (The CLI said: ${reader.resultError})`, log }))
       if (reader.resultError) return fail(`The helper's model call failed: ${reader.resultError}`)
       if (code !== 0) return fail(`${helperExitError(code, signal)}; its stderr is in ${log}`)
       if (!isGuardLoaded) return fail(`The helper's read-only guard didn't load, so its result was not used. Check that ${PLUGIN_ROOT}/hooks/register.tsx loads (claude plugin validate ${PLUGIN_ROOT}).`)

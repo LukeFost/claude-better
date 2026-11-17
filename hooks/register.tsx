@@ -3,8 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
-  BRIEF_MARK, GUARD_ENV, HELPER_ENV, isInside, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
-  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
+  BRIEF_MARK, CLI_LOGIN, GUARD_ENV, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
@@ -18,7 +18,7 @@ const TOOL_NAME = `mcp__better__${TOOL}`
 
 type Outcome =
   | { ok: true; checked: string; log: string }
-  | { ok: false; cancelled: boolean; error: string; log: string }
+  | { ok: false; cancelled: boolean; isLogin?: boolean; error: string; log: string }
 
 type HelperRequest = { kind: 'better' | 'brief'; input: string; task: string; cwd?: string; signal: AbortSignal; onProgress?: (r: StreamReader) => void }
 
@@ -32,6 +32,51 @@ async function findClaude($: EngineInterface, home: string): Promise<string | un
     if (build.kind === 'dir' && (await $.fs.exists(path).catch(() => false))) return path
   }
   return undefined
+}
+
+type ForkEnd = { reason: string; answer: string }
+
+async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ agentId?: string; reply?: string; checked?: string; error?: string; cancelled?: boolean }> {
+  if (req.signal.aborted) return { error: 'cancelled', cancelled: true }
+  S.spawning++
+  S.tasks.set(req.task, undefined)
+  let id: string | undefined
+  try {
+    const spawned = await $.agent.spawn({ subagentType: 'fork', prompt: req.task, description: req.kind === 'brief' ? '/better brief check' : '/better', ...(req.cwd ? { cwd: req.cwd } : {}) })
+    if ('deny' in spawned && spawned.deny) return { error: `Claude Code refused to start it (${spawned.deny})` }
+    id = spawned.agentId ?? S.tasks.get(req.task)
+    if (!id) return { error: 'Claude Code started no agent' }
+    const agentId = id
+    S.forks.add(agentId)
+    await update($, forksA, (ids) => [...new Set([...(ids ?? []), agentId])])
+    S.mine.add(agentId)
+  } catch (e) {
+    return { agentId: id, error: `it couldn't start (${(e as Error).message})` }
+  } finally {
+    S.tasks.delete(req.task)
+    if (!--S.spawning) for (const other of S.ended.keys()) if (!S.mine.has(other)) S.ended.delete(other)
+  }
+  const agentId = id
+  try {
+    const deadline = (await $.clock.now()) + HELPER_TIMEOUT_MS
+    let end: ForkEnd | undefined
+    while (!(end = S.ended.get(agentId))) {
+      if (req.signal.aborted) return { agentId, error: 'cancelled', cancelled: true }
+      if ((await $.clock.now()) > deadline) return { agentId, error: `it timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes` }
+      await $.process.run(WAIT_ARGV)
+    }
+    if (end.reason !== 'answer') return { agentId, reply: end.answer, error: `it ended without an answer (${end.reason})` }
+    try {
+      return { agentId, reply: end.answer, checked: parseMarkedPrompt(end.answer) }
+    } catch (e) {
+      return { agentId, reply: end.answer, error: (e as Error).message.replace(/\.$/, '') }
+    }
+  } catch (e) {
+    return { agentId, error: `/better couldn't wait for it (${(e as Error).message})` }
+  } finally {
+    S.mine.delete(agentId)
+    S.ended.delete(agentId)
+  }
 }
 
 async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcome> {
@@ -103,15 +148,23 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     checked = undefined
     error = `The helper's read-only guard didn't load, so its result was not used. Check that ${$.plugin.root}/hooks/register.tsx loads (claude plugin validate), then try again.`
   }
+  let inSession: Awaited<ReturnType<typeof runInSession>> | undefined
+  const isLogin = !cancelled && !!reader.resultError && isLoginFailure(reader.resultError)
+  if (isLogin) {
+    inSession = await runInSession($, req)
+    checked = inSession.checked
+    cancelled = inSession.cancelled === true
+    error = checked !== undefined ? undefined : cancelled ? 'cancelled' : `${CLI_LOGIN} (The CLI said: ${reader.resultError}) /better then tried a read-only fork of this session instead, and ${inSession.error}.`
+  }
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
     kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
     error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
-    reply: reader.reply, checked,
+    reply: reader.reply, checked, ...(inSession ? { cliError: reader.resultError, inSession: { agentId: inSession.agentId, error: inSession.error, reply: inSession.reply } } : {}),
   }
   const pruneError = await pruneRuns($, `${home}/.claude/better/runs`)
   await $.fs.write(log, JSON.stringify(pruneError ? { ...record, pruneError } : record, null, 2)).catch(() => {})
-  return checked !== undefined && !error ? { ok: true, checked, log } : { ok: false, cancelled, error: error ?? 'unknown failure', log }
+  return checked !== undefined && !error ? { ok: true, checked, log } : { ok: false, cancelled, isLogin: isLogin && !cancelled && !inSession?.agentId, error: error ?? 'unknown failure', log }
 }
 
 async function pruneRuns($: EngineInterface, dir: string): Promise<string | undefined> {
@@ -144,7 +197,10 @@ async function handOver($: EngineInterface, improved: string, surface?: 'termina
   $.ui.toast(`The input box couldn't take the prompt (${filled.refusal ?? 'refused'}); ${copied.isCopied ? 'it is on your clipboard' : 'see the run log in ~/.claude/better/runs'}. Nothing was sent.`, { timeoutMs: 12000 })
 }
 
-const S: { isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string> } = { isHelper: false, forks: new Set() }
+const S: {
+  isHelper: boolean; current?: AbortController; ticker?: { cancel: () => void }; forks: Set<string>
+  spawning: number; tasks: Map<string, string | undefined>; mine: Set<string>; ended: Map<string, ForkEnd>
+} = { isHelper: false, forks: new Set(), spawning: 0, tasks: new Map(), mine: new Set(), ended: new Map() }
 
 function startTicker($: EngineInterface): void {
   S.ticker ??= $.clock.every(1000, () => void update($, tickA, (n) => (n ?? 0) + 1))
@@ -207,7 +263,7 @@ export const register: Register = (on) => {
       description: [
         'Check a brief before you hand it to a subagent, a teammate or a new session that starts with none of this conversation.',
         "A read-only helper on a copy of this chat reads the brief cold, checks it against the repo, and fixes only what would trip the receiver up: references only this conversation explains, wrong or stale paths, symbols, commands and versions, and a missing done-check. It keeps the brief's goal, scope, order and length and adds no work.",
-        'Returns the checked brief, to use as the task verbatim. If it fails or is cancelled it returns an error: do not start the work with the unchecked brief.',
+        'Returns the checked brief, to use as the task verbatim. If it fails or is cancelled it returns an error: do not start the work with the unchecked brief. The one exception is an error that says a login problem stopped the check: tell the user what it says, then go on with the unchecked brief.',
         'Shortcut: start an Agent prompt with "/better " and the brief is checked the same way before the subagent starts. In auto mode Claude Code refuses a prompt changed after it was approved, so there call this tool first and send its result as the prompt.',
       ].join(' '),
       inputSchema: {
@@ -293,7 +349,18 @@ export const register: Register = (on) => {
     return { text: `/better-boomerang is researching in a read-only fork of this chat. ${how} When it's done, press "Back with prompt" above the prompt (or /better-back).`, isTextDisplayOnly: true }
   })
 
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined && S.tasks.has(e.text)) {
+      S.forks.add(e.agentId)
+      S.tasks.set(e.text, e.agentId)
+    }
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) {
+      if (S.mine.has(e.agentId) || S.spawning) S.ended.set(e.agentId, { reason: e.reason, answer: e.answer })
+    }
     const boom = e.agentId !== undefined ? await read($, boomA) : null
     if (!boom || e.agentId !== boom.agentId) return next(e)
     let improved: string | undefined
@@ -320,7 +387,9 @@ export const register: Register = (on) => {
     if ('deny' in where) return { deny: where.deny }
     const out = await checkBrief($, input.brief.trim(), where.cwd, next.signal)
     if (out.ok) return { result: out.checked }
-    return { deny: out.cancelled ? '/better was cancelled, so the brief is unchecked; do not start the work with it.' : `/better couldn't check this brief, so do not start the work with it: ${out.error} (run log: ${out.log})` }
+    if (out.cancelled) return { deny: '/better was cancelled, so the brief is unchecked; do not start the work with it.' }
+    if (out.isLogin) return { deny: `/better couldn't check this brief because of a login problem, not because of the brief. ${out.error} Tell the user that in one line, with the command; then you may start the work with the unchecked brief. (run log: ${out.log})` }
+    return { deny: `/better couldn't check this brief, so do not start the work with it: ${out.error} (run log: ${out.log})` }
   }).catch(() => ({ deny: "/better's brief check failed, so the brief is unchecked; do not start the work with it." }))
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
@@ -328,6 +397,7 @@ export const register: Register = (on) => {
     const brief = e.prompt.replace(BRIEF_MARK, '').trim()
     if (!brief) return { deny: 'A /better subagent brief needs the brief after /better.' }
     const out = await checkBrief($, brief, undefined, next.signal)
+    if (!out.ok && out.isLogin) return { deny: `/better couldn't check this subagent brief because of a login problem, not because of the brief, so the subagent didn't start. ${out.error} Tell the user that in one line, with the command; then send the Agent call again without the /better prefix to start it unchecked.` }
     if (!out.ok) return { deny: out.cancelled ? "/better was cancelled, so the subagent didn't start." : `/better couldn't check this subagent brief, so the subagent didn't start: ${out.error}` }
     return next({ ...e, prompt: out.checked })
   }).catch(($, e, next) => (next.called ? next(e) : typeof e.prompt === 'string' && BRIEF_MARK.test(e.prompt) ? { deny: "/better's brief check failed, so the subagent didn't start." } : next(e)))

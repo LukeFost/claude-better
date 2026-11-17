@@ -169,7 +169,8 @@ async function run(job: Job, isBrief: boolean, input: string, cwd: string): Prom
     })
     if (!out.ok) {
       const text = out.cancelled ? '/better was cancelled; nothing was produced.' : `/better failed: ${out.error}`
-      return { isError: true, content: [{ type: 'text', text: isBrief ? `${text} Do not start the subagent with the unchecked brief.` : text }] }
+      const then = !isBrief ? '' : !out.cancelled && out.isLogin ? ' That is a login problem, not a problem with the brief: tell the user in one line, with the command; then you may start the subagent with the unchecked brief.' : ' Do not start the subagent with the unchecked brief.'
+      return { isError: true, content: [{ type: 'text', text: text + then }] }
     }
     if (isBrief) return { content: [{ type: 'text', text: out.text }] }
     if (stop.signal.aborted || stoppedSince(cwd, since)) return { isError: true, content: [{ type: 'text', text: '/better was cancelled; nothing was produced.' }] }
