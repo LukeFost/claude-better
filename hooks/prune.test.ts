@@ -8,7 +8,7 @@ type Opts = { list?: () => any[]; listThrows?: boolean; helperOut?: string; help
 function world(on: any, opts: Opts) {
   mock.clock(on)
   const seen = { spawned: [] as any[], rm: [] as string[][], written: new Map<string, string>() }
-  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin' })
+  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', CLAUDE_BETTER_RUNS_DIR: '/home/me/.claude/better/runs' })
   on('command.register', () => ({ value: {} }))
   on('tool.register', () => ({ value: {} }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))

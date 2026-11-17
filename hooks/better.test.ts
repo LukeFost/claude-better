@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
-  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine, namedPaths, rootCandidates, promptFile, fillRefusal,
+  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine, namedPaths, rootCandidates, promptFile, fillRefusal, runsDir,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -140,4 +140,12 @@ test('the saved prompt sits beside its run record and is pruned with it', () => 
   expect(promptFile('/r/2026-01-01T00-00-00-000Z-better-0000abcd.json')).toBe('/r/2026-01-01T00-00-00-000Z-better-0000abcd.md')
   expect(staleRecords([`${stem(1)}.json`, `${stem(1)}.md`, `${stem(2)}.json`, `${stem(3)}.md`], 2)).toEqual([`${stem(1)}.json`, `${stem(1)}.md`])
   expect(fillRefusal('no_composer')).toContain("isn't on screen")
+})
+
+test('only an installed copy writes to runs; a checkout, a --plugin-dir copy or an override goes elsewhere', () => {
+  expect(runsDir('/home/me', '/home/me/.claude/plugins/cache/claude-better/better/0.4.9')).toBe('/home/me/.claude/better/runs')
+  expect(runsDir('/home/me', '/home/me/code/claude-better')).toBe('/home/me/.claude/better/runs-dev')
+  expect(runsDir('/home/me', '/tmp/x/plugins/cached/better')).toBe('/home/me/.claude/better/runs-dev')
+  expect(runsDir('/home/me', '/home/me/.claude/plugins/cache/claude-better/better/0.4.9', '/tmp/eval/runs/')).toBe('/tmp/eval/runs')
+  expect(runsDir('/home/me', '/home/me/code/claude-better', 'relative')).toBe('/home/me/.claude/better/runs-dev')
 })

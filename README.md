@@ -26,7 +26,7 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 ```
 
 </td></tr>
-<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.8. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.9. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
 
@@ -79,7 +79,7 @@ From an A/B test of 7 real tasks, 2 runs each, graded blind ([`docs/ab-test.md`]
 | The prompt goes above your draft | The same, using `$.prompt.read` and `$.prompt.fill`. If the box can't take it after about 5 seconds of trying, the prompt goes on the clipboard, into a `.md` file beside the run record and into the chat, and waits for `/better-back`. |
 | `/better-boomerang`: runs in the chat, then `navigateTree` back | A read-only fork subagent shown in the main view (`$.ui.view`). Back is one press or `/better-back`. The main conversation never sees the research. |
 | A `/better` subagent brief is checked with brief.md, and a failure blocks the start | The same, on the `Agent` tool. A failure, a cancel or a reply with no marked brief refuses the call, so no subagent starts. |
-| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` (always there, even when `CLAUDE_CONFIG_DIR` points elsewhere) holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply and result. Only the newest 200 are kept. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
+| `pi.appendEntry` records | A JSON record per run in `~/.claude/better/runs/` (always there, even when `CLAUDE_CONFIG_DIR` points elsewhere) holding input, argv, exit code, whether the guard loaded, the last 3 stderr lines, tools, reply, result and, for `/better`, where the prompt went (`handover`). A dev checkout or `--plugin-dir` copy writes to `~/.claude/better/runs-dev` instead, and `CLAUDE_BETTER_RUNS_DIR` (absolute path) overrides both. Only the newest 200 are kept. No environment or credentials go in it. stderr stays in the record: errors shown to you or to an agent name the record instead. |
 
 ## Cursor
 
@@ -121,7 +121,7 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 51 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 53 tests; the flows run on the terminal and desktop surfaces
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types

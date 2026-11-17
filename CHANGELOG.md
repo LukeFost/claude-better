@@ -4,6 +4,17 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-11-17
+
+### Added
+
+- A `/better` run record now says where the prompt went, as `handover`: `filled` (in the input box, with the number of tries), `kept` (the box refused it; with the refusal, whether the clipboard took it and the `.md` path), or `filled_later` (put in the box afterwards with `Put in input box` or `/better-back`).
+
+### Changed
+
+- Only an installed copy of the plugin writes to `~/.claude/better/runs`. A dev checkout or any `--plugin-dir` copy writes to `~/.claude/better/runs-dev`, with its own cap of 200, so test and eval runs no longer push real use out of the cap. On 2026-11-17, 159 of the 200 records were test runs.
+- `CLAUDE_BETTER_RUNS_DIR` (an absolute path) sends the records anywhere else, for an eval that runs the installed copy. Cursor honours it too.
+
 ## [0.4.8] - 2026-11-17
 
 ### Fixed
@@ -65,7 +76,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.9
 [0.4.8]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.8
 [0.4.7]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.7
 [0.4.6]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.6

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
-  CLI_LOGIN, GUARD_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, isLoginFailure, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates,
+  CLI_LOGIN, GUARD_ENV, RUNS_ENV, HELPER_ENV, HELPER_TIMEOUT_MS, NO_CLAUDE, isLoginFailure, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates,
   helperArgv, helperExitError, KEEP_RUNS, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from '../hooks/better.ts'
 
@@ -27,7 +27,7 @@ export function runHelper(req: {
   onStage?: (stage: number, total: number, label: string) => void
 }): Promise<Outcome> {
   const home = process.env.HOME ?? ''
-  const runs = `${home}/.claude/better/runs`
+  const runs = process.env[RUNS_ENV]?.startsWith('/') ? process.env[RUNS_ENV]! : `${home}/.claude/better/runs`
   mkdirSync(runs, { recursive: true })
   pruneRuns(runs)
   const log = `${runs}/${new Date().toISOString().replace(/[:.]/g, '-')}-${req.kind}-${randomUUID().slice(0, 8)}.json`

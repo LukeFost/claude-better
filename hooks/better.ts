@@ -113,6 +113,16 @@ export const FILL_TRIES = 6
 export const fillRefusal = (refusal: string | undefined) =>
   refusal === 'no_composer' ? "this session's input box isn't on screen" : refusal === 'dialog' ? 'a dialog is open over the input box' : 'the input box refused it'
 
+export const RUNS_ENV = 'CLAUDE_BETTER_RUNS_DIR'
+
+/** Installed copies write to runs; a dev checkout, a --plugin-dir copy or a test writes to runs-dev, so tests don't push real use out of the cap. */
+export function runsDir(home: string, pluginRoot: string, override?: string): string {
+  if (override?.startsWith('/')) return norm(override)
+  return `${home}/.claude/better/${/[\\/]plugins[\\/]cache[\\/]/.test(pluginRoot) ? 'runs' : 'runs-dev'}`
+}
+
+export type Handover = { result: 'filled' | 'filled_later' | 'kept'; tries: number; refusal?: string; isCopied?: boolean; savedTo?: string }
+
 export const promptFile = (log: string) => log.replace(/\.json$/, '.md')
 
 const PATH_IN_TEXT = /(?<![\w.~$>:/-])(?:~\/|\/(?!dev\/))[\w.@+-]+(?:\/[\w.@+-]+)*/g

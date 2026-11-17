@@ -1,9 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import type { Handover } from './better'
+
 import type { BetterBoomerang, BetterRun, BetterWaiting } from '../types'
 import {
-  BRIEF_MARK, CLI_LOGIN, FILL_TRIES, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
+  BRIEF_MARK, CLI_LOGIN, FILL_TRIES, runsDir, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
   desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
@@ -115,7 +117,8 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const cwd = req.cwd ?? (await $.session.cwd())
   const startedAt = await $.clock.now()
   const id = crypto.randomUUID().slice(0, 8)
-  const log = `${home}/.claude/better/runs/${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}-${req.kind}-${id}.json`
+  const runs = runsDir(home, $.plugin.root, await $.env.get('CLAUDE_BETTER_RUNS_DIR'))
+  const log = `${runs}/${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}-${req.kind}-${id}.json`
   const sessionId = (await $.session.turns()) > 0 ? await $.session.id() : undefined
   const model = await $.session.model()
   const claude = await findClaude($, home)
@@ -195,7 +198,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
     reply: reader.reply, checked, ...(inSession ? { cliError: reader.resultError, inSession: { agentId: inSession.agentId, error: inSession.error, reply: inSession.reply } } : {}),
   }
-  const pruneError = await pruneRuns($, `${home}/.claude/better/runs`)
+  const pruneError = await pruneRuns($, runs)
   await $.fs.write(log, JSON.stringify(pruneError ? { ...record, pruneError } : record, null, 2)).catch(() => {})
   const refused = reader.tools.filter((t) => t.state === 'failed' && isOutsideRefusal(t.why)).length
   return checked !== undefined && !error ? { ok: true, checked, log, refused } : { ok: false, cancelled, isLogin: isLogin && !cancelled && !inSession?.agentId, error: error ?? 'unknown failure', log }
@@ -222,15 +225,25 @@ async function pruneRuns($: EngineInterface, dir: string): Promise<string | unde
 
 type Surface = 'terminal' | 'desktop' | 'vscode' | 'mobile'
 
-async function handOver($: EngineInterface, improved: string, opts: { surface?: Surface; saveTo?: string; note?: string; isRetry?: boolean } = {}): Promise<boolean> {
+async function noteHandover($: EngineInterface, log: string | undefined, handover: Handover): Promise<void> {
+  if (!log) return
+  try {
+    await $.fs.write(log, JSON.stringify({ ...JSON.parse(await $.fs.read(log)), handover }, null, 2))
+  } catch {}
+}
+
+async function handOver($: EngineInterface, improved: string, opts: { surface?: Surface; saveTo?: string; log?: string; note?: string; isRetry?: boolean } = {}): Promise<boolean> {
   let draft = ''
   let refusal: string | undefined
+  let tries = 0
   for (let i = 0; i < (opts.isRetry ? 1 : FILL_TRIES); i++) {
+    tries++
     if (i) await $.process.run(WAIT_ARGV).catch(() => {})
     draft = (await $.prompt.read()).text
     const filled = await $.prompt.fill({ text: handOverText(improved, draft), mode: 'replace' })
     if (filled.isFilled) {
       await update($, waitingA, () => null)
+      await noteHandover($, opts.log, { result: opts.isRetry ? 'filled_later' : 'filled', tries })
       $.ui.toast(`The improved prompt is in your input box${draft.trim() ? ", above the draft you'd typed" : ''}. Edit it, then press Enter to send.${opts.note ?? ''}`, { timeoutMs: 8000 })
       return true
     }
@@ -243,7 +256,8 @@ async function handOver($: EngineInterface, improved: string, opts: { surface?: 
   }
   const copied = await $.ui.copy({ text: improved, ...(opts.surface ? { surface: opts.surface } : {}) }).catch(() => ({ isCopied: false }))
   const path = opts.saveTo && (await $.fs.write(opts.saveTo, `${improved}\n`).then(() => opts.saveTo, () => undefined))
-  await update($, waitingA, () => ({ improved, ...(path ? { path } : {}) }))
+  await update($, waitingA, () => ({ improved, ...(path ? { path } : {}), ...(opts.log ? { log: opts.log } : {}) }))
+  await noteHandover($, opts.log, { result: 'kept', tries, ...(refusal ? { refusal } : {}), isCopied: copied.isCopied, ...(path ? { savedTo: path } : {}) })
   $.ui.log(`/better's improved prompt (not sent; ${why}):\n\n${improved}`)
   const where = [copied.isCopied ? 'on your clipboard' : '', path ? `saved in ${path}` : '', 'shown in the chat'].filter(Boolean).join(', ')
   $.ui.toast(`The input box couldn't take the prompt (${why}). It is ${where}. Press "Put in input box" above the prompt, or run /better-back, to try again. Nothing was sent.${opts.note ?? ''}`, { timeoutMs: 20000 })
@@ -270,12 +284,12 @@ async function back($: EngineInterface, surface?: Surface): Promise<string | und
   if (!boom?.improved) {
     const waiting = await read($, waitingA)
     if (!waiting) return 'No /better prompt is waiting.'
-    return (await handOver($, waiting.improved, { surface, isRetry: true })) ? undefined : `The input box still couldn't take the prompt${waiting.path ? `; it is saved in ${waiting.path}` : ''}. Nothing was sent.`
+    return (await handOver($, waiting.improved, { surface, log: waiting.log, isRetry: true })) ? undefined : `The input box still couldn't take the prompt${waiting.path ? `; it is saved in ${waiting.path}` : ''}. Nothing was sent.`
   }
   const viewed = await $.ui.view({})
   if (viewed.deny && boom.isViewed !== false) return `Couldn't switch back to the main conversation: ${viewed.deny}`
   const home = (await $.env.get('HOME')) ?? ''
-  const saveTo = `${home}/.claude/better/runs/${new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')}-better-${crypto.randomUUID().slice(0, 8)}.md`
+  const saveTo = `${runsDir(home, $.plugin.root, await $.env.get('CLAUDE_BETTER_RUNS_DIR'))}/${new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')}-better-${crypto.randomUUID().slice(0, 8)}.md`
   const isFilled = await handOver($, boom.improved, { surface, saveTo })
   await update($, boomA, () => null)
   return isFilled ? undefined : "The input box couldn't take the prompt; it is kept for you, see the note above the prompt. Nothing was sent."
@@ -367,7 +381,7 @@ export const register: Register = (on) => {
             void update($, runA, (v) => (v ? { ...v, stage, label, tools: r.tools.map((t) => ({ ...t })) } : v))
           },
         })
-        if (out.ok) await handOver($, out.checked, { surface, saveTo: promptFile(out.log), note: out.refused ? ` The helper was refused ${out.refused === 1 ? '1 read' : `${out.refused} reads`}, most often for a path outside its folders; the run record lists them.` : '' })
+        if (out.ok) await handOver($, out.checked, { surface, saveTo: promptFile(out.log), log: out.log, note: out.refused ? ` The helper was refused ${out.refused === 1 ? '1 read' : `${out.refused} reads`}, most often for a path outside its folders; the run record lists them.` : '' })
         else if (out.cancelled) $.ui.toast('/better cancelled; nothing was sent')
         else $.ui.toast(`/better failed: ${out.error}`, { timeoutMs: 15000 })
       } catch (err) {
@@ -516,7 +530,7 @@ export const register: Register = (on) => {
         <Box key="waiting" flexDirection="column">
           <Box>
             <Text color="claude">/better's prompt is waiting  </Text>
-            <Button key="put" variant="primary" label="Put in input box" onPress={async () => void (await handOver($, waiting.improved, { surface: e.surface, isRetry: true }))} />
+            <Button key="put" variant="primary" label="Put in input box" onPress={async () => void (await handOver($, waiting.improved, { surface: e.surface, log: waiting.log, isRetry: true }))} />
             <Text>  </Text>
             <Button key="drop" plain label="dismiss" onPress={() => update($, waitingA, () => null)} />
           </Box>

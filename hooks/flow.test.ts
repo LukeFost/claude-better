@@ -36,7 +36,7 @@ function world(on: any, opts: Opts) {
     },
   }
   const files = new Set(opts.files ?? ['/usr/local/bin/claude'])
-  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', ...opts.env })
+  mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', CLAUDE_BETTER_RUNS_DIR: '/home/me/.claude/better/runs', ...opts.env })
   on('command.register', () => ({ value: {} }))
   on('tool.register', () => ({ value: {} }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
@@ -110,6 +110,8 @@ function world(on: any, opts: Opts) {
   })
   return seen
 }
+
+const lastRecord = (seen: ReturnType<typeof world>) => JSON.parse(seen.written.get(seen.writes.findLast((p) => p.endsWith('.json'))!)!)
 
 async function eachSurface($: any, seen: ReturnType<typeof world>, run: (surface: Surface) => Promise<void>) {
   seen.engine = $
@@ -407,6 +409,7 @@ test('a box that is briefly away is tried again, and the prompt lands once it is
     await seen.clock.settle()
     expect(seen.fillTries).toBe(3)
     expect(seen.filled).toEqual(['Deeper prompt.'])
+    expect(lastRecord(seen).handover).toEqual({ result: 'filled', tries: 3 })
     expect(seen.copies).toEqual([])
     expect(seen.toasts.at(-1)).toContain('is in your input box')
   })
@@ -428,6 +431,8 @@ test('when the box and the clipboard both refuse, the whole prompt is saved as a
     expect(toast).toContain("The input box couldn't take the prompt")
     expect(toast).toContain('Nothing was sent')
     expect(toast).not.toContain('clipboard')
+    expect(lastRecord(seen).handover).toEqual({ result: 'kept', tries: 6, isCopied: false, savedTo: md })
+    expect(lastRecord(seen).checked).toBe('Deeper prompt,\nsecond line.')
     expect(seen.agentRan).toEqual([])
     const ui = await $.ui.mount({ plugin: 'better', surface, ...BAND })
     expect(await ui.find({ type: 'Button', key: 'put' })).toBeDefined()
@@ -448,6 +453,7 @@ test('the waiting prompt goes in the box from the band button or /better-back on
     expect(seen.filled).toEqual([])
     const back = await $.command.run({ command: 'better-back', args: '' } as any)
     expect(back.text).toContain('is in your input box')
+    expect(lastRecord(seen).handover).toEqual({ result: 'filled_later', tries: 1 })
     expect(seen.filled).toEqual(['Deeper prompt.'])
     expect((await $.command.run({ command: 'better-back', args: '' } as any)).text).toContain('No /better prompt is waiting')
   })
@@ -515,5 +521,15 @@ test('reads refused outside the helper\'s folders are counted in the toast', asy
     await $.command.run({ command: 'better', args: 'x' } as any)
     await seen.clock.settle()
     expect(seen.toasts.at(-1)).toContain('refused 1 read, most often for a path outside its folders')
+  })
+})
+
+test('a copy that is not the installed one keeps its records in runs-dev, away from real use', async ($, on) => {
+  const seen = world(on, { helperOut: reply('P.'), env: { CLAUDE_BETTER_RUNS_DIR: '' } })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'x' } as any)
+    await seen.clock.settle()
+    expect(seen.writes.filter((p) => p.endsWith('.json')).every((p) => p.startsWith('/home/me/.claude/better/runs-dev/'))).toBe(true)
+    expect(lastRecord(seen).handover).toEqual({ result: 'filled', tries: 1 })
   })
 })
