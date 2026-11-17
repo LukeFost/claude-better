@@ -135,7 +135,7 @@ export function shortPath(path: string, cwd: string, home: string): string {
 export function toolLabel(name: string, input: any, cwd: string, home: string): string {
   let label = name
   if (name === 'Bash' && typeof input?.command === 'string') {
-    const parts = input.command.split(/\s*(?:&&|\|\||;|\||&|\n)\s*/).map((p: string) => p.trim()).filter((p: string) => p && !/^cd\s/.test(p))
+    const parts = input.command.split(/\s*(?:&&|\|\||;|\|&|\||(?<![<>&|])&(?![>&])|\n)\s*/).map((p: string) => p.trim()).filter((p: string) => p && !/^cd\s/.test(p))
     const first = (parts[0] ?? '') + (parts.length > 1 ? ` (+${parts.length - 1} more)` : '')
     label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (p: string) => shortPath(p, cwd, home))
   } else {
