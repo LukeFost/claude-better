@@ -1,6 +1,6 @@
 # Design: discuss and edit the improved prompt in a pane
 
-Status: proposal, 2026-11-17. Nothing here is built. Written against claude-better 0.4.9.
+Status: step 1 (the pane with edit and send) shipped in 0.5.0 on 2026-11-17, desktop only. Step 2 (ask the helper for a change) is not built. Written against claude-better 0.4.9.
 
 ## What it is for
 
