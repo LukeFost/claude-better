@@ -149,7 +149,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
     error = `The helper's read-only guard didn't load, so its result was not used. Check that ${$.plugin.root}/hooks/register.tsx loads (claude plugin validate), then try again.`
   }
   let inSession: Awaited<ReturnType<typeof runInSession>> | undefined
-  const isLogin = !cancelled && !!reader.resultError && isLoginFailure(reader.resultError)
+  const isLogin = !cancelled && !!reader.resultError && (reader.authFailed || isLoginFailure(reader.resultError))
   if (isLogin) {
     inSession = await runInSession($, req)
     if (inSession.isUnmarked) inSession = await runInSession($, req)

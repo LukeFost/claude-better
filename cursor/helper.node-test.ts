@@ -59,3 +59,14 @@ test("an expired CLI login says what expired and the command to run, and is mark
     fake.restore()
   }
 })
+
+test("the CLI's authentication_failed mark is a login failure whatever the words", async () => {
+  const fake = fakeClaude(`echo '{"type":"assistant","error":"authentication_failed","message":{"content":[{"type":"text","text":"New words"}]}}'\necho '{"type":"result","subtype":"success","is_error":true,"result":"New words"}'\nexit 1`)
+  try {
+    const out = await runHelper({ kind: 'brief', input: 'x', cwd: fake.home })
+    assert.equal(!out.ok && out.isLogin, true)
+    assert.match(!out.ok ? out.error : '', /claude auth login.*The CLI said: New words/)
+  } finally {
+    fake.restore()
+  }
+})

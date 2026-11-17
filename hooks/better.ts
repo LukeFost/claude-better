@@ -180,6 +180,7 @@ export class StreamReader {
   text = ''
   reply = ''
   resultError: string | undefined
+  authFailed = false
   sawResult = false
   private buffered = ''
   private cwd: string
@@ -217,6 +218,7 @@ export class StreamReader {
       else return false
       return true
     }
+    if (ev.type === 'assistant' && ev.error === 'authentication_failed') this.authFailed = true
     if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
       let changed = false
       for (const part of ev.message.content) {

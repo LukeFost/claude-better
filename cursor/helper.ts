@@ -81,7 +81,7 @@ export function runHelper(req: {
       const fail = (error: string, cancelled = false) => done(settle(record, { ok: false, cancelled, error, log }))
       if (stopped === 'cancelled') return fail('cancelled', true)
       if (stopped === 'timeout') return fail(`The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`)
-      if (reader.resultError && isLoginFailure(reader.resultError)) return done(settle({ ...record, cliError: reader.resultError }, { ok: false, cancelled: false, isLogin: true, error: `${CLI_LOGIN} (The CLI said: ${reader.resultError})`, log }))
+      if (reader.resultError && (reader.authFailed || isLoginFailure(reader.resultError))) return done(settle({ ...record, cliError: reader.resultError }, { ok: false, cancelled: false, isLogin: true, error: `${CLI_LOGIN} (The CLI said: ${reader.resultError})`, log }))
       if (reader.resultError) return fail(`The helper's model call failed: ${reader.resultError}`)
       if (code !== 0) return fail(`${helperExitError(code, signal)}; its stderr is in ${log}`)
       if (!isGuardLoaded) return fail(`The helper's read-only guard didn't load, so its result was not used. Check that ${PLUGIN_ROOT}/hooks/register.tsx loads (claude plugin validate ${PLUGIN_ROOT}).`)

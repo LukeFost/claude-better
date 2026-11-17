@@ -4,6 +4,12 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-17
+
+### Fixed
+
+- A login failure is now read from the CLI's own `authentication_failed` mark on the failed turn, not only from the words of its message, so a reworded message no longer blocks the check. The wording match stays as a backup.
+
 ## [0.4.6] - 2026-11-17
 
 ### Fixed
@@ -46,7 +52,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.7
 [0.4.6]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.6
 [0.4.5]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.5
 [0.4.4]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.4

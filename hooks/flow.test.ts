@@ -379,3 +379,13 @@ test("a logged-out CLI started from the desktop app ('Authentication required') 
     expect(seen.forked).toHaveLength(1)
   })
 })
+
+test("the CLI's own authentication_failed mark takes the session fork, whatever words come with it", async ($, on) => {
+  const out = JSON.stringify({ type: 'assistant', error: 'authentication_failed', is_api_error_message: true, message: { content: [{ type: 'text', text: 'Some wording nobody has seen yet' }] } }) + '\n' + loginError('Some wording nobody has seen yet')
+  const seen = world(on, { helperOut: out, helperCode: 1, forkAnswer: '<improved-prompt>\nChecked by the mark.\n</improved-prompt>' })
+  await eachSurface($, seen, async () => {
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in ok && ok.result).toBe('Checked by the mark.')
+    expect(seen.forked).toHaveLength(1)
+  })
+})
