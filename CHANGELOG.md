@@ -4,6 +4,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-17
+
 ### Added
 
 - `better-code-mode`, a second plugin in this marketplace for Claude Code's experimental Code Mode, which refuses to start while an enabled plugin hooks tool calls. It is `better` without its three tool-call hooks: it keeps `/better`, `/better-cancel`, `/better-back`, the band and the draft pane, and has no `check_brief`, no `/better ` Agent prefix, no `/better-boomerang` and no fork fallback for an expired CLI login. Its helper is held to reads by a guard module that only the helper process loads. Enable it in place of `better`, not beside it. `better` itself is unchanged. Not tested inside a session with Code Mode on; see the README's Code Mode section.
@@ -102,7 +104,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/LukeFost/claude-better/releases/tag/v0.6.0
 [0.5.1]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.1
 [0.5.0]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.0
 [0.4.9]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.9
