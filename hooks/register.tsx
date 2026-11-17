@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BetterBoomerang, BetterRun } from '../types'
 import {
   BRIEF_MARK, GUARD_ENV, HELPER_ENV, isInside, outsideFolder, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildBriefTask, buildHelperTask, claudeCandidates, clock,
-  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, parseMarkedPrompt, stageOf, staleRecords, toolLine,
+  desktopEngineDir, handOverText, helperArgv, helperExitError, helperVerdict, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
 const runA = atom({ plugin: 'better', key: 'run' } as const, null as BetterRun | null)
@@ -117,12 +117,17 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
 async function pruneRuns($: EngineInterface, dir: string): Promise<string | undefined> {
   try {
     const stale = staleRecords((await $.fs.list(dir)).filter((e) => e.kind === 'file').map((e) => e.name), KEEP_RUNS)
-    if (!stale.length) return undefined
-    const child = $.process.spawn({ argv: ['/bin/rm', '-f', '--', ...stale.map((n) => `${dir}/${n}`)], cwd: dir })
-    for (;;) {
-      const step = await child.next()
-      if (step.done) return step.value.code === 0 ? undefined : `rm exited with code ${step.value.code}`
+    if (!stale.length || !dir.startsWith('/')) return undefined
+    for (let i = 0; i < stale.length; i += 500) {
+      const child = $.process.spawn({ argv: ['/bin/rm', '-f', '--', ...stale.slice(i, i + 500).map((n) => `${dir}/${n}`)], cwd: dir })
+      for (;;) {
+        const step = await child.next()
+        if (!step.done) continue
+        if (step.value.code !== 0) return `rm exited with code ${step.value.code}`
+        break
+      }
     }
+    return undefined
   } catch (e) {
     return (e as Error).message
   }
@@ -345,7 +350,7 @@ export const register: Register = (on) => {
       let trail = ''
       for (let i = run.tools.length - 1; i >= 0; i--) {
         const t = run.tools[i]!
-        const chip = `${t.state === 'running' ? '•' : t.state === 'ok' ? '✓' : '✗'} ${t.label.length > 28 ? `${t.label.slice(0, 27)}…` : t.label}`
+        const chip = `${t.state === 'running' ? '•' : t.state === 'ok' ? '✓' : '✗'} ${chipLabel(t.label)}`
         if ((chip + '  ' + trail).length > width - count.length - 6) break
         trail = trail ? `${chip}  ${trail}` : chip
       }

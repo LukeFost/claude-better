@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
-  staleRecords, toolLabel, toolLine,
+  chipLabel, staleRecords, toolLabel, toolLine,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -78,10 +78,19 @@ test('a compound command is labelled as more than its first part, and a refusal 
   expect(toolLabel('Bash', { command: 'cat README.md' }, '/w', '/h')).toBe('cat README.md')
   expect(toolLabel('Bash', { command: "cat README.md; sed 's/=.*//' .env" }, '/w', '/h')).toBe('cat README.md (+1 more)')
   expect(toolLabel('Bash', { command: 'cd /w && cat a | head -5' }, '/w', '/h')).toBe('cat a (+1 more)')
+  expect(toolLabel('Bash', { command: 'cat a\nsed b c & wait' }, '/w', '/h')).toBe('cat a (+2 more)')
   const r = new StreamReader('/w', '/h')
   r.push(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'cat a; sed x b' } }] } }) + '\n')
   r.push(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text: 'Permission to use Bash denied:\nnot read-only' }] }] } }) + '\n')
   expect(r.tools.map(toolLine)).toEqual(['failed cat a (+1 more): Permission to use Bash denied: not read-only'])
+})
+
+test('a long chained command keeps its "(+N more)" in the band chip', () => {
+  expect(chipLabel('git log --oneline -5 (+1 more)')).toBe('git log --oneline… (+1 more)')
+  expect(chipLabel('git status')).toBe('git status')
+  expect(chipLabel('grep -rn helperVerdict hooks/register.tsx')).toBe('grep -rn helperVerdict hook…')
+  expect(chipLabel('grep -rn helperVerdict hooks/register.tsx (+3 more)').endsWith('… (+3 more)')).toBe(true)
+  expect(chipLabel('grep -rn helperVerdict hooks/register.tsx (+3 more)').length).toBe(28)
 })
 
 test('only the oldest run records beyond the cap are stale, and nothing else in the folder', () => {

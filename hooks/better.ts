@@ -135,7 +135,7 @@ export function shortPath(path: string, cwd: string, home: string): string {
 export function toolLabel(name: string, input: any, cwd: string, home: string): string {
   let label = name
   if (name === 'Bash' && typeof input?.command === 'string') {
-    const parts = input.command.split(/\s*(?:&&|\|\||;|\|)\s*/).map((p: string) => p.trim()).filter((p: string) => p && !/^cd\s/.test(p))
+    const parts = input.command.split(/\s*(?:&&|\|\||;|\||&|\n)\s*/).map((p: string) => p.trim()).filter((p: string) => p && !/^cd\s/.test(p))
     const first = (parts[0] ?? '') + (parts.length > 1 ? ` (+${parts.length - 1} more)` : '')
     label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (p: string) => shortPath(p, cwd, home))
   } else {
@@ -150,6 +150,12 @@ function resultText(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) return content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join(' ')
   return ''
+}
+
+export function chipLabel(label: string, max = 28): string {
+  const [, base = '', more = ''] = /^(.*?)( \(\+\d+ more\))?$/s.exec(label) ?? []
+  const room = max - more.length
+  return `${base.length > room ? `${base.slice(0, room - 1)}…` : base}${more}`
 }
 
 export const toolLine = (t: ToolRow) => `${t.state} ${t.label}${t.why ? `: ${t.why}` : ''}`
