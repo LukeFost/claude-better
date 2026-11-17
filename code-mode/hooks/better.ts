@@ -181,6 +181,28 @@ export function helperArgv(opts: { claude: string; sessionId?: string; model?: s
   ]
 }
 
+export const isResumeFailure = (stderr: string) => /failed to resume session/i.test(stderr)
+
+const TRANSCRIPT_MAX = 60_000
+
+/** The conversation as text, newest kept, for a helper that could not open the session itself. */
+export function transcriptNote(messages: unknown): string {
+  if (!Array.isArray(messages)) return ''
+  const rows: string[] = []
+  let size = 0
+  for (let i = messages.length - 1; i >= 0 && size < TRANSCRIPT_MAX; i--) {
+    const m = messages[i] as { role?: string; text?: string; toolUses?: { tool?: string; input?: unknown; text?: string }[] }
+    const tools = (m.toolUses ?? []).map((u) => `[${u.tool ?? 'tool'} ${JSON.stringify(u.input ?? {}).slice(0, 400)}]${u.text ? ` -> ${u.text.slice(0, 1200)}` : ''}`)
+    const body = [m.text?.trim(), ...tools].filter(Boolean).join('\n')
+    if (!body) continue
+    const row = `### ${m.role === 'user' ? 'Me' : 'You'}\n\n${body.slice(0, 8000)}`
+    rows.unshift(row)
+    size += row.length
+  }
+  if (!rows.length) return ''
+  return `## The conversation so far\n\nThis session could not be opened for you, so this is its text, oldest first, with long parts cut. Treat it as the conversation the task refers to.\n\n${rows.join('\n\n')}`
+}
+
 export function helperVerdict(tool: string, isReadOnly: boolean | undefined): { decision: 'pass' } | { decision: 'deny'; reason: string } {
   if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return { decision: 'pass' }
   if (tool === 'Bash' && isReadOnly) return { decision: 'pass' }

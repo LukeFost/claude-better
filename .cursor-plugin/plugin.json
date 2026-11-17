@@ -1,7 +1,7 @@
 {
   "name": "better",
   "displayName": "Better",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Deepen a prompt, or check a subagent brief, with a read-only helper that reads your code first. The improved prompt lands in a new chat box (or your clipboard); nothing is sent.",
   "author": {
     "name": "Luke Foster"

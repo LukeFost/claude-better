@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   BRIEF_MARK, KEEP_RUNS, StreamReader, buildBriefTask, buildHelperTask, handOverText, helperArgv, helperVerdict, parseMarkedPrompt, stageOf,
-  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine, namedPaths, rootCandidates, promptFile, fillRefusal, runsDir,
+  chipLabel, isLoginFailure, staleRecords, toolLabel, toolLine, namedPaths, rootCandidates, promptFile, fillRefusal, runsDir, isResumeFailure, transcriptNote,
 } from './better'
 
 test('the marked block is the prompt, and a missing or empty block is an error', () => {
@@ -148,4 +148,28 @@ test('only an installed copy writes to runs; a checkout, a --plugin-dir copy or 
   expect(runsDir('/home/me', '/tmp/x/plugins/cached/better')).toBe('/home/me/.claude/better/runs-dev')
   expect(runsDir('/home/me', '/home/me/.claude/plugins/cache/claude-better/better/0.4.9', '/tmp/eval/runs/')).toBe('/tmp/eval/runs')
   expect(runsDir('/home/me', '/home/me/code/claude-better', 'relative')).toBe('/home/me/.claude/better/runs-dev')
+})
+
+test("a session the CLI can't open is told apart from other failures", () => {
+  expect(isResumeFailure("Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here.")).toBe(true)
+  expect(isResumeFailure('boom: model unavailable')).toBe(false)
+  expect(isResumeFailure('')).toBe(false)
+})
+
+test('the conversation as text: oldest first, tool calls with their results, empty rows left out, the newest kept when it is too long', () => {
+  expect(transcriptNote([])).toBe('')
+  expect(transcriptNote(undefined)).toBe('')
+  expect(transcriptNote([{ role: 'assistant', text: '', toolUses: [] }])).toBe('')
+  const note = transcriptNote([
+    { role: 'user', text: 'fix the cap', toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { file_path: 'a.py' }, text: 'CAP = 5' }] },
+    { role: 'assistant', text: 'It is 5.', toolUses: [] },
+  ])
+  expect(note.startsWith('## The conversation so far')).toBe(true)
+  expect(note.indexOf('### Me\n\nfix the cap')).toBeLessThan(note.indexOf('[Read {"file_path":"a.py"}] -> CAP = 5'))
+  expect(note.indexOf('CAP = 5')).toBeLessThan(note.indexOf('### You\n\nIt is 5.'))
+  const long = transcriptNote(Array.from({ length: 40 }, (_, i) => ({ role: 'user', text: `m${i} ${'x'.repeat(7000)}`, toolUses: [] })))
+  expect(long).toContain('m39 ')
+  expect(long).not.toContain('m0 ')
+  expect(long.length).toBeLessThan(80_000)
 })

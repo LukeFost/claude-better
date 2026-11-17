@@ -4,6 +4,12 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-17
+
+### Fixed
+
+- `/better` failed after the first turn of a session with Code Mode on: the helper's `claude -p` can't resume a Code Mode session ("Failed to resume session"). When that start fails, the helper now runs once more without the session and gets the conversation as text (messages, replies and tool calls with their results, the newest 60,000 characters). It reads the code itself under the same guard. The run record gains `resumeError`. This is in both plugins.
+
 ## [0.6.0] - 2026-11-17
 
 ### Added
@@ -104,7 +110,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/LukeFost/claude-better/releases/tag/v0.6.1
 [0.6.0]: https://github.com/LukeFost/claude-better/releases/tag/v0.6.0
 [0.5.1]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.1
 [0.5.0]: https://github.com/LukeFost/claude-better/releases/tag/v0.5.0

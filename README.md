@@ -26,7 +26,7 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 ```
 
 </td></tr>
-<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.6.0. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.6.1. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
 
@@ -64,7 +64,9 @@ claude plugin disable better@claude-better
 | `/better-boomerang` | yes | no: only a tool-call hook holds a fork of your session to reads |
 | An expired CLI login | falls back to a read-only fork of your session | fails and names the fix, `claude auth login` |
 
-Tested on 2.1.326: with only `better-code-mode` enabled, a terminal session offers the Code Mode opt-in instead of refusing it, and `/better` fills the input box with Code Mode declined. Not tested: `/better` inside a session that has Code Mode on. The helper resumes a fork of your session with `claude -p`, where Code Mode isn't available, and Claude Code says a Code Mode session can be resumed only with Code Mode on, so from the second turn on the helper may fail to start there.
+Inside a session that has Code Mode on, the helper can't open your session: it runs with `claude -p`, where Code Mode isn't available, and a Code Mode session can be resumed only with Code Mode on. So when that start fails, `/better` runs the helper once more on its own and gives it the conversation as text: your messages, Claude's replies and each tool call with its result, the newest 60,000 characters. The helper still reads the code itself, under the same read-only guard. The run record's `resumeError` says when this happened. Before the first turn there is no session to open and nothing changes.
+
+Tested on 2.1.326: with only `better-code-mode` enabled, a terminal session starts in Code Mode instead of refusing it, and `/better` fills the input box there, both before the first turn and after one.
 
 `code-mode/` is generated from the full plugin by `scripts/build-code-mode.mjs`; edit `hooks/` and run the script, never the copy.
 

@@ -15,7 +15,7 @@ const reply = (body: string) =>
 
 const EXPIRED = JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' }) + '\n'
 
-function world(on: any, opts: { helperOut?: string; isGuardless?: boolean; env?: Record<string, string> } = {}) {
+function world(on: any, opts: { helperOut?: string; isGuardless?: boolean; env?: Record<string, string>; runs?: { out?: string; code?: number; err?: string }[]; messages?: any[] } = {}) {
   const clock = mock.clock(on)
   const seen = { clock, commands: [] as string[], tools: [] as string[], spawned: [] as any[], forked: [] as any[], filled: [] as string[], toasts: [] as string[], written: new Map<string, string>() }
   mock.env(on, { HOME: '/home/me', PATH: '/usr/local/bin:/usr/bin', CLAUDE_BETTER_RUNS_DIR: '/home/me/.claude/better/runs', ...opts.env })
@@ -31,7 +31,7 @@ function world(on: any, opts: { helperOut?: string; isGuardless?: boolean; env?:
   on('session.version', () => ({ value: { version: '2.1.326', base: '2.1.326' } }))
   on('session.surface', () => ({ value: 'terminal' }))
   on('session.surfaces', () => ({ value: ['terminal'] }))
-  on('session.messages', () => ({ value: [] }))
+  on('session.messages', () => ({ value: opts.messages ?? [] }))
   on('fs.stat', (_: any, e: any) => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('fs.exists', (_: any, e: any) => ({ value: e.path === '/usr/local/bin/claude' }))
   on('fs.list', () => ({ value: [] }))
@@ -48,7 +48,14 @@ function world(on: any, opts: { helperOut?: string; isGuardless?: boolean; env?:
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
+    const run = opts.runs?.[Math.min(seen.spawned.length, opts.runs.length) - 1]
+    if (run?.err) {
+      yield { stream: 'stderr', text: run.err }
+      return { value: { code: run.code ?? 1, signal: null } }
+    }
     if (!opts.isGuardless) seen.written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
+    if (run?.out) yield { stream: 'stdout', text: run.out }
+    if (run) return { value: { code: run.code ?? 0, signal: null } }
     if (opts.helperOut) yield { stream: 'stdout', text: opts.helperOut }
     return { value: { code: 0, signal: null } }
   })
@@ -98,4 +105,21 @@ test("loaded inside the helper, this plugin writes no guard proof: only the guar
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
   expect([...seen.written.keys()]).toEqual([])
   expect(seen.commands).toEqual([])
+})
+
+test('in a Code Mode session the helper cannot open the session: it runs once more with the conversation as text, under the guard', async ($, on) => {
+  const seen = world(on, {
+    runs: [{ err: "Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here.\n", code: 1 }, { out: reply('From the transcript.') }],
+    messages: [{ role: 'user', text: 'the retry cap is wrong', toolUses: [] }],
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'better', args: '' } as any)
+  await seen.clock.settle()
+  expect(seen.spawned.length).toBe(2)
+  expect(seen.spawned[0].argv).toContain('--resume')
+  const again: string[] = seen.spawned[1].argv
+  expect(again).not.toContain('--resume')
+  expect(again[again.indexOf('--plugin-dir') + 1]).toMatch(/\/guard$/)
+  expect(seen.spawned[1].input).toContain('### Me\n\nthe retry cap is wrong')
+  expect(seen.filled).toEqual(['From the transcript.'])
 })

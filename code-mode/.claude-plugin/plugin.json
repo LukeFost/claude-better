@@ -1,6 +1,6 @@
 {
   "name": "better-code-mode",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "better for Code Mode: /better deepens a prompt with a read-only helper and puts it in your input box. It hooks no tool calls, so Claude Code's Code Mode starts with it enabled. Use it in place of `better`, not beside it.",
   "types": "./types/index.d.ts",
   "license": "MIT",

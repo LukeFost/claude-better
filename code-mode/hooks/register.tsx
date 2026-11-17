@@ -6,7 +6,7 @@ import type { Handover } from './better'
 
 import type { BetterBoomerang, BetterDraft, BetterRun, BetterWaiting } from '../types'
 import {
-  CLI_LOGIN, DRAFT_PANE, editRows, FILL_TRIES, runsDir, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildHelperTask, claudeCandidates, clock, desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
+  CLI_LOGIN, DRAFT_PANE, editRows, FILL_TRIES, runsDir, GUARD_ENV, MAX_READ_DIRS, fillRefusal, isOutsideRefusal, namedPaths, promptFile, readNote, rootCandidates, HELPER_ENV, isInside, isLoginFailure, HELPER_TIMEOUT_MS, NO_CLAUDE, StreamReader, buildHelperTask, claudeCandidates, clock, desktopEngineDir, handOverText, WAIT_ARGV, helperArgv, helperExitError, isResumeFailure, transcriptNote, KEEP_RUNS, chipLabel, parseMarkedPrompt, stageOf, staleRecords, toolLine,
 } from './better'
 
 const runA = atom({ plugin: 'better-code-mode', key: 'run' } as const, null as BetterRun | null)
@@ -77,8 +77,9 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const model = await $.session.model()
   const claude = await findClaude($, home)
   const addDirs = req.kind === 'better' ? await readDirs($, req.input, cwd, home).catch(() => [] as string[]) : []
-  const argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot: `${$.plugin.root}/guard`, addDirs })
-  const reader = new StreamReader(cwd, home)
+  const pluginRoot = `${$.plugin.root}/guard`
+  let argv = helperArgv({ claude: claude ?? 'claude', sessionId, model, pluginRoot, addDirs })
+  let reader = new StreamReader(cwd, home)
   const stop = new AbortController()
   const onAbort = () => stop.abort(req.signal.reason ?? 'cancelled')
   if (req.signal.aborted) onAbort()
@@ -91,26 +92,42 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
 
   let stderr = ''
   let exit: { code: number | null; signal: string | null } | undefined
+  let resumeError: string | undefined
   let error: string | undefined
   let cancelled = false
   let checked: string | undefined
   try {
     if (!claude) throw new Error(NO_CLAUDE)
-    const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input: `${req.task}\n\n${readNote(cwd, addDirs)}` })
+    let input = `${req.task}\n\n${readNote(cwd, addDirs)}`
     for (;;) {
-      const pending = child.next()
-      pending.catch(() => {})
-      const step = await Promise.race([pending, stopped])
-      if (step === 'stopped') {
-        void child.return(undefined as never).catch(() => {})
-        break
+      const child = $.process.spawn({ argv, cwd, env: { [HELPER_ENV]: '1', [GUARD_ENV]: log }, input })
+      for (;;) {
+        const pending = child.next()
+        pending.catch(() => {})
+        const step = await Promise.race([pending, stopped])
+        if (step === 'stopped') {
+          void child.return(undefined as never).catch(() => {})
+          break
+        }
+        if (step.done) {
+          exit = step.value
+          break
+        }
+        if (step.value.stream === 'stderr') stderr = (stderr + step.value.text).slice(-4000)
+        else if (reader.push(step.value.text)) req.onProgress?.(reader)
       }
-      if (step.done) {
-        exit = step.value
-        break
-      }
-      if (step.value.stream === 'stderr') stderr = (stderr + step.value.text).slice(-4000)
-      else if (reader.push(step.value.text)) req.onProgress?.(reader)
+      // A session this CLI can't open (one started in Code Mode, say) fails before the helper reads anything.
+      // Run it once more on its own, with the conversation as text in place of the session.
+      if (resumeError !== undefined || !sessionId || stop.signal.aborted || !exit || exit.code === 0 || !isResumeFailure(stderr)) break
+      resumeError = stderr.trim().split('\n').slice(-1)[0] ?? ''
+      // The guard's proof must come from the run whose result is used, never from the one that failed.
+      await $.fs.write(log, '{}')
+      const said = transcriptNote(await $.session.messages().catch(() => []))
+      argv = helperArgv({ claude, model, pluginRoot, addDirs })
+      input = [req.task, said, readNote(cwd, addDirs)].filter(Boolean).join('\n\n')
+      reader = new StreamReader(cwd, home)
+      stderr = ''
+      exit = undefined
     }
     if (reader.end()) req.onProgress?.(reader)
     if (stop.signal.aborted) {
@@ -143,7 +160,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const durationMs = (await $.clock.now()) - startedAt
   const record = {
     kind: req.kind, input: req.input, cwd, sessionId, model, claude: claude ?? null, addDirs, argv: argv.slice(1), durationMs, exit, cancelled, isGuardLoaded: isGuarded,
-    error, stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
+    error, ...(resumeError !== undefined ? { resumeError } : {}), stderrTail: stderr.trim().split('\n').slice(-3), tools: reader.tools.map(toolLine),
     reply: reader.reply, checked, ...(inSession ? { cliError: reader.resultError, inSession: { agentId: inSession.agentId, error: inSession.error, reply: inSession.reply } } : {}),
   }
   const pruneError = await pruneRuns($, runs)

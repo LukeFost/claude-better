@@ -20,6 +20,8 @@ type Opts = {
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
   forkAnswer?: string | string[]; forkReason?: 'answer' | 'error'
   fills?: ('no_composer' | 'dialog' | 'ok')[]; isCopied?: boolean; messages?: any[]; hasPane?: boolean; submitDrop?: string
+  /** One entry per helper start, in order; the last repeats. Overrides helperOut and helperCode. */
+  runs?: { out?: string; code?: number; err?: string; isGuardless?: boolean }[]
 }
 
 const loginError = (text: string) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: text }) + '\n'
@@ -103,9 +105,15 @@ function world(on: any, opts: Opts) {
   })
   on('process.spawn', async function* (_: any, e: any) {
     seen.spawned.push(e)
-    if (!opts.isGuardless) written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
+    if (!opts.isGuardless && !opts.runs?.[Math.min(seen.spawned.length, opts.runs.length) - 1]?.isGuardless) written.set(e.env.CLAUDE_BETTER_GUARD_FILE, JSON.stringify({ isGuardLoaded: true }))
     if (opts.hang) {
       await new Promise(() => {})
+    }
+    const run = opts.runs?.[Math.min(seen.spawned.length, opts.runs.length) - 1]
+    if (run) {
+      if (run.err) yield { stream: 'stderr', text: run.err }
+      if (run.out) yield { stream: 'stdout', text: run.out }
+      return { value: { code: run.code ?? 0, signal: null } }
     }
     if (opts.helperOut) yield { stream: 'stdout', text: opts.helperOut }
     if (opts.helperCode) yield { stream: 'stderr', text: 'boom: model unavailable\n' }
@@ -686,4 +694,62 @@ test('a draft whose pane the person closed shows a Show draft row; pressing it r
   expect(seen.submitted).toEqual([])
   expect(seen.filled).toEqual([])
   await band.unmount()
+})
+
+const NO_RESUME = "Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here."
+
+test("a session the CLI can't open is run once more without it, with the conversation as text", async ($, on) => {
+  const seen = world(on, {
+    runs: [{ err: `${NO_RESUME}\n`, code: 1 }, { out: reply('From the transcript.') }],
+    messages: [{ role: 'user', text: 'the retry cap is wrong', toolUses: [] }, { role: 'assistant', text: 'It is 5 in retry.py.', toolUses: [{ tool_use_id: 'u1', tool: 'Read', input: { file_path: '/repo/retry.py' }, text: 'MAX_RETRIES = 5' }] }],
+  })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: '' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned.length).toBe(2)
+    expect(seen.spawned[0].argv).toContain('--resume')
+    expect(seen.spawned[1].argv).not.toContain('--resume')
+    expect(seen.spawned[1].argv).not.toContain('--fork-session')
+    expect(seen.spawned[0].input).not.toContain('## The conversation so far')
+    expect(seen.spawned[1].input).toContain('## The conversation so far')
+    expect(seen.spawned[1].input).toContain('### Me\n\nthe retry cap is wrong')
+    expect(seen.spawned[1].input).toContain('[Read {"file_path":"/repo/retry.py"}] -> MAX_RETRIES = 5')
+    expect(seen.spawned[1].input).toContain('## Folders you can read')
+    expect(seen.filled).toEqual(['From the transcript.'])
+    const record = lastRecord(seen)
+    expect(record.resumeError).toBe(NO_RESUME)
+    expect(record.argv).not.toContain('--resume')
+    expect(record.isGuardLoaded).toBe(true)
+  })
+})
+
+test('a session that fails to open twice is not tried a third time, and nothing is filled', async ($, on) => {
+  const seen = world(on, { runs: [{ err: `${NO_RESUME}\n`, code: 1 }] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned.length).toBe(2)
+    expect(seen.filled).toEqual([])
+    expect(seen.toasts.some((t) => t.includes('/better failed'))).toBe(true)
+  })
+})
+
+test('a helper that fails for another reason is not run again', async ($, on) => {
+  const seen = world(on, { helperCode: 1 })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned.length).toBe(1)
+  })
+})
+
+test("the guard's proof from the start that failed does not vouch for the second one", async ($, on) => {
+  const seen = world(on, { runs: [{ err: `${NO_RESUME}\n`, code: 1 }, { out: reply('Unguarded.'), isGuardless: true }] })
+  await eachSurface($, seen, async () => {
+    await $.command.run({ command: 'better', args: 'anything' } as any)
+    await seen.clock.settle()
+    expect(seen.spawned.length).toBe(2)
+    expect(seen.filled).toEqual([])
+    expect(lastRecord(seen).isGuardLoaded).toBe(false)
+  })
 })
