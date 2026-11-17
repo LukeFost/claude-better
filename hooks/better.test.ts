@@ -109,6 +109,8 @@ test("a login failure of the helper's CLI is told apart from every other failure
   for (const said of [
     'Failed to authenticate: OAuth session expired and could not be refreshed', 'Not logged in · Please run /login', 'Failed to authenticate. API Error: 401 Invalid bearer token',
     'Invalid API key · Fix external API key', 'OAuth token revoked · Please run /login', 'OAuth session expired',
+    'Authentication required · Sign in again to continue', 'Login expired · Please run /login', 'Login reached its time limit · Please run /login', 'Session expired. Please run /login to sign in again.',
+    'OAuth refresh token is no longer valid; run /login to re-authenticate', 'API Error: 401 Invalid API key · Please run /login',
   ]) expect(isLoginFailure(said)).toBe(true)
   for (const said of ['API Error: 529 Overloaded', 'error_max_turns', 'The reply has no <improved-prompt> block.', 'Credit balance is too low',
     'API Error: 403 {"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}', 'Your account does not have access to Claude Code. Please run /login.',

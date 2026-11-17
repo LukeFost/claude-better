@@ -370,3 +370,12 @@ test('a session fork that is unusable twice is not run a third time, and blocks 
     expect('deny' in r && String(r.deny)).toContain('unusable twice')
   })
 })
+
+test("a logged-out CLI started from the desktop app ('Authentication required') takes the session fork too", async ($, on) => {
+  const seen = world(on, { helperOut: loginError('Authentication required · Sign in again to continue'), helperCode: 1, forkAnswer: '<improved-prompt>\nChecked while logged out.\n</improved-prompt>' })
+  await eachSurface($, seen, async () => {
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in ok && ok.result).toBe('Checked while logged out.')
+    expect(seen.forked).toHaveLength(1)
+  })
+})

@@ -4,6 +4,12 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-17
+
+### Fixed
+
+- A logged-out CLI started from the desktop app says "Authentication required · Sign in again to continue", which 0.4.5 did not read as a login failure, so the check still blocked. That wording, and the CLI's other expired-login messages, now take the session fork.
+
 ## [0.4.5] - 2026-11-17
 
 ### Fixed
@@ -40,7 +46,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.6
 [0.4.5]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.5
 [0.4.4]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.4
 [0.4.3]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.3

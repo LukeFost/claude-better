@@ -4,7 +4,7 @@
 
 It reads what your prompt touches, then puts a deeper version above your draft. An agent can also have a subagent's brief checked against the repo before the subagent starts.
 
-It is a port of [nicobailon/pi-better](https://github.com/nicobailon/pi-better) 0.2.0 by Nico Bailon (MIT, [`LICENSE.pi-better`](LICENSE.pi-better)). The idea and the prompts are his, used word for word: only the session-log path in [`helper.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/helper.md) and [`brief.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/brief.md) is changed (see `HELPER_MD` and `BRIEF_MD` in [`hooks/better.ts`](hooks/better.ts)). The port is MIT too ([`LICENSE`](LICENSE)). Version 0.4.5; changes are in [`CHANGELOG.md`](CHANGELOG.md).
+It is a port of [nicobailon/pi-better](https://github.com/nicobailon/pi-better) 0.2.0 by Nico Bailon (MIT, [`LICENSE.pi-better`](LICENSE.pi-better)). The idea and the prompts are his, used word for word: only the session-log path in [`helper.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/helper.md) and [`brief.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/brief.md) is changed (see `HELPER_MD` and `BRIEF_MD` in [`hooks/better.ts`](hooks/better.ts)). The port is MIT too ([`LICENSE`](LICENSE)). Version 0.4.6; changes are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Install
 
@@ -26,7 +26,7 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 ```
 
 </td></tr>
-<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.5. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
+<tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.4.6. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
 
@@ -119,7 +119,7 @@ How it differs from the Claude Code plugin:
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 38 tests; the flows run on the terminal and desktop surfaces
+claude plugin test .     # 39 tests; the flows run on the terminal and desktop surfaces
 node --test 'cursor/*.node-test.ts'   # the Cursor hooks and helper (plain Node)
 npx -y oxlint@1.90.0 --deny-warnings  # .oxlintrc.json; no package.json needed
 tsc -p .                 # once Claude Code has laid .claude-plugin/types
