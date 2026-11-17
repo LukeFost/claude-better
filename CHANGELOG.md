@@ -4,6 +4,12 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-17
+
+### Fixed
+
+- When the session fork that stands in for the helper replies without a marked block, it is run once more before the check fails. A second unusable reply still blocks the work.
+
 ## [0.4.4] - 2026-11-17
 
 ### Fixed
@@ -34,7 +40,8 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 - Run records in `~/.claude/better/runs` are capped at the newest 200.
 - Cursor: the improved prompt goes on the clipboard only when Cursor's "Create chat with prompt" dialog can't take it.
 
-[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/LukeFost/claude-better/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.5
 [0.4.4]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.4
 [0.4.3]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.3
 [0.4.2]: https://github.com/LukeFost/claude-better/releases/tag/v0.4.2

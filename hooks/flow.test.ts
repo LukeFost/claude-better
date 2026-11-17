@@ -18,7 +18,7 @@ const reply = (body: string) =>
 type Opts = {
   helperOut?: string; helperCode?: number; hang?: boolean; draft?: string; env?: Record<string, string>
   files?: string[]; dirs?: Record<string, string[]>; spawnDeny?: string; isGuardless?: boolean; links?: Record<string, string>
-  forkAnswer?: string; forkReason?: 'answer' | 'error'
+  forkAnswer?: string | string[]; forkReason?: 'answer' | 'error'
 }
 
 const loginError = (text: string) => JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: text }) + '\n'
@@ -72,10 +72,11 @@ function world(on: any, opts: Opts) {
   on('ui.view', (_: any, e: any) => (seen.views.push(e), { value: at.surface === 'terminal' ? {} : { deny: 'no main view here' } }))
   if (opts.spawnDeny) on('agent.spawn', (_: any, e: any) => (seen.forked.push(e), { deny: opts.spawnDeny }))
   else if (opts.forkAnswer !== undefined) {
+    const answers = [opts.forkAnswer].flat()
     on('agent.spawn', async (_: any, e: any) => {
       const agentId = `fork-${seen.forked.push(e)}`
       await seen.engine.turn.start({ agentId, turnId: 't', text: e.prompt })
-      seen.pending.push(() => seen.engine.turn.complete({ agentId, turnId: 't', reason: opts.forkReason ?? 'answer', answer: opts.forkAnswer, durationMs: 1, isAborted: false }))
+      seen.pending.push(() => seen.engine.turn.complete({ agentId, turnId: 't', reason: opts.forkReason ?? 'answer', answer: answers[Math.min(seen.forked.length, answers.length) - 1], durationMs: 1, isAborted: false }))
       return { model: 'claude-opus-5-5' }
     })
   }
@@ -346,5 +347,26 @@ test('a failure that is not a login problem starts no session fork and still blo
     const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
     expect(seen.forked).toHaveLength(0)
     expect('deny' in r && String(r.deny)).toContain('do not start the work with it')
+  })
+})
+
+const UNMARKED = '(1) a\n<improved-prompt>\nLost its end.\n</improked-prompt>'
+
+test('a session fork whose reply has no marked block is run once more', async ($, on) => {
+  const seen = world(on, { helperOut: EXPIRED, helperCode: 1, forkAnswer: [UNMARKED, '<improved-prompt>\nSecond try.\n</improved-prompt>'] })
+  await eachSurface($, seen, async () => {
+    const ok = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect('result' in ok && ok.result).toBe('Second try.')
+    expect(seen.forked).toHaveLength(2)
+  })
+})
+
+test('a session fork that is unusable twice is not run a third time, and blocks the work', async ($, on) => {
+  const twice = world(on, { helperOut: EXPIRED, helperCode: 1, forkAnswer: UNMARKED })
+  await eachSurface($, twice, async () => {
+    const r = await $.tool.call({ tool: 'mcp__better__check_brief', brief: 'Rough brief.' } as any)
+    expect(twice.forked).toHaveLength(2)
+    expect('deny' in r && String(r.deny)).toContain('do not start the work with it')
+    expect('deny' in r && String(r.deny)).toContain('unusable twice')
   })
 })

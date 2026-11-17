@@ -36,7 +36,7 @@ async function findClaude($: EngineInterface, home: string): Promise<string | un
 
 type ForkEnd = { reason: string; answer: string }
 
-async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ agentId?: string; reply?: string; checked?: string; error?: string; cancelled?: boolean }> {
+async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ agentId?: string; reply?: string; checked?: string; error?: string; cancelled?: boolean; isUnmarked?: boolean }> {
   if (req.signal.aborted) return { error: 'cancelled', cancelled: true }
   S.spawning++
   S.tasks.set(req.task, undefined)
@@ -69,7 +69,7 @@ async function runInSession($: EngineInterface, req: HelperRequest): Promise<{ a
     try {
       return { agentId, reply: end.answer, checked: parseMarkedPrompt(end.answer) }
     } catch (e) {
-      return { agentId, reply: end.answer, error: (e as Error).message.replace(/\.$/, '') }
+      return { agentId, reply: end.answer, isUnmarked: true, error: `its reply was unusable twice (${(e as Error).message})` }
     }
   } catch (e) {
     return { agentId, error: `/better couldn't wait for it (${(e as Error).message})` }
@@ -152,6 +152,7 @@ async function runHelper($: EngineInterface, req: HelperRequest): Promise<Outcom
   const isLogin = !cancelled && !!reader.resultError && isLoginFailure(reader.resultError)
   if (isLogin) {
     inSession = await runInSession($, req)
+    if (inSession.isUnmarked) inSession = await runInSession($, req)
     checked = inSession.checked
     cancelled = inSession.cancelled === true
     error = checked !== undefined ? undefined : cancelled ? 'cancelled' : `${CLI_LOGIN} (The CLI said: ${reader.resultError}) /better then tried a read-only fork of this session instead, and ${inSession.error}.`
