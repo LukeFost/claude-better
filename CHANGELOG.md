@@ -4,6 +4,10 @@ Notable changes to this plugin are recorded here. Versions before 0.4.2 are in t
 
 ## [Unreleased]
 
+### Added
+
+- README: an Update section with the commands to update the plugin in Claude Code and Cursor, and what to check when `/better` still fails.
+
 ## [0.6.1] - 2026-11-17
 
 ### Fixed

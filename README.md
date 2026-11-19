@@ -4,7 +4,7 @@
 
 It reads what your prompt touches, then puts a deeper version above your draft. An agent can also have a subagent's brief checked against the repo before the subagent starts.
 
-It is a port of [nicobailon/pi-better](https://github.com/nicobailon/pi-better) 0.2.0 by Nico Bailon (MIT, [`LICENSE.pi-better`](LICENSE.pi-better)). The idea and the prompts are his, used word for word: only the session-log path in [`helper.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/helper.md) and [`brief.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/brief.md) is changed (see `HELPER_MD` and `BRIEF_MD` in [`hooks/better.ts`](hooks/better.ts)). The port is MIT too ([`LICENSE`](LICENSE)). Version 0.4.7; changes are in [`CHANGELOG.md`](CHANGELOG.md).
+It is a port of [nicobailon/pi-better](https://github.com/nicobailon/pi-better) 0.2.0 by Nico Bailon (MIT, [`LICENSE.pi-better`](LICENSE.pi-better)). The idea and the prompts are his, used word for word: only the session-log path in [`helper.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/helper.md) and [`brief.md`](https://github.com/nicobailon/pi-better/blob/v0.2.0/brief.md) is changed (see `HELPER_MD` and `BRIEF_MD` in [`hooks/better.ts`](hooks/better.ts)). The port is MIT too ([`LICENSE`](LICENSE)). Version 0.6.1; changes are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Install
 
@@ -29,6 +29,24 @@ git clone https://github.com/LukeFost/claude-better ~/.cursor/plugins/local/bett
 <tr><td><code>cd</code> into your project and start <code>claude</code> (or open the project in the desktop app's Code tab), then type <code>/better &lt;your prompt&gt;</code>. Claude Code's own first-run screens (theme, renderer, browser tools) don't affect the plugin; if it asks whether you trust the folder, pick "Yes, I trust this folder" (the cursor starts on "No, exit"), since the helper reads only inside it. <code>claude plugin list</code> should show <code>better@claude-better</code> at 0.6.1. The desktop app loads plugins installed this way for its Code sessions; its plain chat does not run Claude Code plugins.</td>
 <td>Skip the clone if the Claude Code plugin is installed: Cursor imports it. Reload Cursor, then type <code>/better &lt;your prompt&gt;</code>. See <a href="#cursor">Cursor</a>.</td></tr>
 </table>
+
+## Update
+
+Claude Code doesn't update the plugin on its own. Refresh the marketplace, then update the plugin you use:
+
+```sh
+claude plugin marketplace update claude-better
+claude plugin update better@claude-better            # or better-code-mode@claude-better
+```
+
+Then quit and restart Claude Code, or the desktop app: a session loads plugins only when it starts. `claude plugin list` shows the version you have; the latest is in [`CHANGELOG.md`](CHANGELOG.md).
+
+In Cursor, run `git pull` in `~/.cursor/plugins/local/better` and reload Cursor. If Cursor imports the Claude Code plugin instead, update that one as above.
+
+If `/better` still fails after updating:
+
+- No `/better` command: the plugin isn't installed or is disabled (`claude plugin list`), or you're in the desktop app's plain chat, which doesn't run plugins.
+- A login error: the `claude` CLI's login is separate from the app's and can expire. Run `claude auth login` in a terminal.
 
 ## Use: commands
 
